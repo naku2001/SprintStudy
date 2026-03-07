@@ -1,0 +1,18 @@
+# Smart Study App
+
+## Project Structure
+
+**smart-study-app/**
+├── **backend/** # FastAPI Application (Python)
+│   ├── `main.py`               # App entry point & API routes
+│   ├── **services/** # Gemini API integration & NLP logic
+│   ├── **models/** # Pydantic schemas for data validation
+│   └── `requirements.txt`
+│
+├── **frontend/** # React Application (Vite + Tailwind)
+│   ├── **src/**
+│   │   ├── **components/** # UI logic for Flashcards & Quizzes
+│   │   └── **api/** # Axios/Fetch backend connectors
+│   └── `package.json`
+│
+└── `docker-compose.yml`        # Orchestrates both services
