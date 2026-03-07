@@ -29,3 +29,23 @@
    ```bash
    git clone [https://github.com/sjohannes/njere.git](https://github.com/sjohannes/njere.git)
    cd njere
+
+smart-study-app/
+├── backend/                # FastAPI Application (Python)
+│   ├── main.py             # App entry point & API routes
+│   ├── services/           # Gemini API integration & NLP logic
+│   │   ├── gemini_client.py
+│   │   └── text_processor.py
+│   ├── models/             # Pydantic schemas for data validation
+│   ├── .env                # API Keys (Protected)
+│   └── requirements.txt
+├── frontend/               # React Application (Vite + Tailwind)
+│   ├── src/
+│   │   ├── components/     # UI logic for Flashcards & Quizzes
+│   │   ├── api/            # Axios/Fetch backend connectors
+│   │   └── App.jsx
+│   ├── package.json
+│   └── vite.config.js
+└── docker-compose.yml       # Containerization for easy deployment
+
+   
