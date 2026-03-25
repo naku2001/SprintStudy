@@ -12,6 +12,7 @@
 
 ## Project Structure
 
+```
 **smart-study-app/**
 ├── **backend/** # FastAPI Application (Python)
 │   ├── `main.py`               # App entry point & API routes
@@ -26,7 +27,7 @@
 │   └── `package.json`
 │
 └── `docker-compose.yml`        # Orchestrates both services
-
+```
 ## 🚀 Key Features
 
 * **Smart Summarization:** Transform dense academic papers or lecture notes into concise, digestible insights using state-of-the-art LLMs.
