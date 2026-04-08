@@ -1,4 +1,4 @@
-# Njere — AI Study Companion
+# Njere AI Study Companion
 
 **Njere** means *Wisdom* in Shona. The name feels right because the whole point of this app is to take a wall of academic text and turn it into something you can actually learn from.
 
@@ -8,15 +8,15 @@ Upload a PDF or a text file, and Njere reads it, breaks it into chunks, embeds e
 
 ## What it does right now
 
-- **Smart summarization** — drop in a `.pdf` or `.txt`, get a clean structured summary streamed back in real time. No waiting for the full thing to generate before you see anything.
-- **Persistent library** — every note you summarize gets chunked, embedded, and stored in Pinecone. Your library builds up over time.
-- **Re-summarize anytime** — stored notes can be re-summarized without re-uploading the file. The chunks live in Pinecone with their metadata, so we just pull them back and run the model again.
-- **Note detail view** — you can inspect individual chunks and see the embedding vector previews for any stored note.
+- **Smart summarization**
+- **Persistent library** 
+- **Re-summarize anytime** 
+- **Note detail view**
 
 ## What's being built
 
-- **Flashcards** *(35% done)* — auto-generate Anki-style active recall cards from your summaries. Q&A pairs and spaced repetition are part of the plan too.
-- **Performance tracking** — keep tabs on what you've reviewed, what you're weak on, and how your retention is improving over time.
+- **Flashcards** *(35% done)* 
+- **Performance tracking**
 
 ---
 
