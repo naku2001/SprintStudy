@@ -2,7 +2,7 @@
 
 **Njere** means *Wisdom* in Shona. The name feels right because the whole point of this app is to take a wall of academic text and turn it into something you can actually learn from.
 
-Upload a PDF or a text file, and Njere reads it, breaks it into chunks, embeds each chunk with Google Gemini, stores everything in Pinecone, then streams a structured summary back to you — key takeaways, topic flow, review questions and all. It's built to feel fast and to stay out of your way.
+Upload a PDF or a text file, and Njere reads it, breaks it into chunks, embeds each chunk with Google Gemini, stores everything in Pinecone, then streams a structured summary back to you key takeaways, topic flow, review questions and all. It's built to feel fast and to stay out of your way.
 
 ---
 
