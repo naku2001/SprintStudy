@@ -14,7 +14,7 @@
 
 ```
 **smart-study-app/**
-├── **backend/** # FastAPI Application (Python)
+├── **backend/** # Flask Application (Python)
 │   ├── `main.py`               # App entry point & API routes
 │   ├── **services/** # Gemini API integration & NLP logic
 │   ├── **models/** # Pydantic schemas for data validation
@@ -40,7 +40,7 @@
 
 * **Frontend:** [Streamlit](https://streamlit.io/) for a clean, mobile-friendly user interface.
 * **Core AI:** [PyTorch](https://pytorch.org/) & [Hugging Face Transformers](https://huggingface.co/).
-* **Retrieval:** Vector databases for efficient Information Retrieval (RAG).
+* **Data Layer:** [Pinecone](https://www.pinecone.io/) as the unified vector+metadata store for notes, summaries, Q&A context, and flashcards.
 * **Optimization:** Model quantization for efficient deployment.
 
 ## 📦 Installation & Setup
@@ -52,3 +52,68 @@
 
 
    
+
+## Study Note Summary API (Implemented)
+
+### 1) Install backend dependencies
+
+```bash
+pip install -r backend/requirements.txt
+```
+
+### 2) Configure environment
+
+Update `.env` with:
+
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL=gemini-2.5-flash`
+- `PINECONE_API_KEY`
+- `PINECONE_INDEX_NAME`
+- `PINECONE_NAMESPACE`
+- `PINECONE_CLOUD`
+- `PINECONE_REGION`
+- `EMBEDDING_DIMENSION`
+
+### 3) Run API
+
+```bash
+python backend/main.py
+```
+
+### 4) Open web UI
+
+Open:
+
+`http://localhost:8000/`
+
+Then upload one `.pdf` or `.txt` and click **Summarize**.
+
+### 5) (Optional) Call summarize endpoint directly
+
+`POST /api/study-notes/summarize` with multipart file upload (`.pdf` or `.txt`).
+
+For streaming markdown output (recommended):
+
+`POST /api/study-notes/summarize-stream`
+
+Example:
+
+```bash
+curl -X POST "http://localhost:8000/api/study-notes/summarize" \
+  -H "accept: application/json" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@./your_note.pdf"
+```
+
+### 6) Manage stored notes
+
+- `GET /api/study-notes`  
+  List stored notes (filename, note_id, chunk count, local file existence).
+- `GET /api/study-notes/<note_id>`  
+  View chunks and embedding preview for one note.
+- `POST /api/study-notes/<note_id>/resummarize`  
+  Re-run summary generation using stored chunks in Pinecone (no re-upload needed).
+- `POST /api/study-notes/<note_id>/resummarize-stream`  
+  Re-run summary generation as streaming markdown output.
+- `DELETE /api/study-notes/<note_id>`  
+  Delete Pinecone vectors and local uploaded file for one note.
