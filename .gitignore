@@ -1,3 +1,5 @@
 .env
+__pycache__/
+*.pyc
 backend/data/uploads_tmp/*
 !backend/data/uploads_tmp/.gitkeep
