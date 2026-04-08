@@ -25,8 +25,8 @@ Upload a PDF or a text file, and Njere reads it, breaks it into chunks, embeds e
 | Layer | What we use |
 |---|---|
 | Backend | Python + Flask |
-| AI — generation | Google Gemini 2.5 Flash |
-| AI — embeddings | Gemini Embedding (`gemini-embedding-001`, 768-dim) |
+| Summary | Google Gemini 2.5 Flash |
+| Embeddings | Gemini Embedding (`gemini-embedding-001`, 768-dim) |
 | Vector store | Pinecone (serverless, AWS) |
 | PDF parsing | PyMuPDF |
 | Streaming | Server-Sent Events (SSE) |
