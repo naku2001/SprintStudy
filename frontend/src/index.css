@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --border:     rgba(255, 255, 255, 0.07);
+  --border-hi:  rgba(0, 212, 170, 0.35);
+  --accent-dim: rgba(0, 212, 170, 0.1);
+}
+
+/* ── Base ─────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background-color: #0c0e14;
+  color: #dde2ef;
+  font-family: 'Outfit', system-ui, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Noise grain overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Scrollbars ───────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* ── Border utilities ─────────────────────────────────────── */
+.border-base  { border-color: var(--border); }
+.border-hi    { border-color: var(--border-hi); }
+
+/* ── Typing cursor ────────────────────────────────────────── */
+.typing-cursor::after {
+  content: '▋';
+  color: #00d4aa;
+  font-size: 0.82em;
+  vertical-align: baseline;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* ── Responsive grid ─────────────────────────────────────── */
+@media (max-width: 820px) {
+  /* App.jsx sets grid via inline style; override for mobile */
+  body > #root > div {
+    grid-template-columns: 1fr !important;
+    grid-template-areas: "nav" "main" "shelf" !important;
+  }
+  aside {
+    border-left: none !important;
+    border-top: 1px solid var(--border);
+    min-height: 280px;
+    max-height: 420px;
+  }
+}
+
+/* ── Summary markdown ─────────────────────────────────────── */
+.summary-md h1 {
+  font-family: 'DM Serif Display', serif;
+  font-size: 1.65rem;
+  font-style: italic;
+  font-weight: 400;
+  color: #dde2ef;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.85rem;
+  margin-bottom: 1.4rem;
+  line-height: 1.35;
+}
+
+.summary-md h2 {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #00d4aa;
+  margin-top: 1.8rem;
+  margin-bottom: 0.75rem;
+}
+
+.summary-md h3 {
+  font-family: 'DM Serif Display', serif;
+  font-size: 1.15rem;
+  font-weight: 400;
+  color: #e8c56a;
+  margin-top: 1.3rem;
+  margin-bottom: 0.5rem;
+}
+
+.summary-md p {
+  color: #9da8bf;
+  margin-bottom: 0.75rem;
+  line-height: 1.75;
+}
+
+.summary-md ul,
+.summary-md ol {
+  padding-left: 1.35rem;
+  margin-bottom: 0.85rem;
+  color: #9da8bf;
+}
+
+.summary-md li {
+  margin-bottom: 0.4rem;
+  line-height: 1.65;
+}
+
+.summary-md li::marker {
+  color: #00d4aa;
+}

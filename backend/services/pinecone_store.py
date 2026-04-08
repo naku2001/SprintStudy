@@ -36,8 +36,15 @@ class PineconeStore:
             existing = set(indexes.names())
         else:
             existing = {index["name"] for index in indexes}
+
         if self.index_name in existing:
-            return
+            desc = self.client.describe_index(self.index_name)
+            existing_dim = getattr(desc, "dimension", None)
+            if existing_dim is not None and existing_dim != settings.EMBEDDING_DIMENSION:
+                # Dimension mismatch — delete the stale index and recreate
+                self.client.delete_index(self.index_name)
+            else:
+                return
 
         self.client.create_index(
             name=self.index_name,
