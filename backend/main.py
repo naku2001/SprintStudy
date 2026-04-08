@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
-import sys
 import json
+import sys
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -16,6 +16,8 @@ from flask_cors import CORS
 from backend.config.settings import settings
 from backend.services.pinecone_store import PineconeStore
 from backend.services.study_note_service import StudyNoteSummarizer
+
+ALLOWED_EXTENSIONS = {".pdf", ".txt"}
 
 app = Flask(__name__)
 CORS(app)
@@ -31,33 +33,51 @@ def health():
     return jsonify({"status": "ok"})
 
 
-@app.post("/api/study-notes/summarize")
-def summarize_study_note():
+def _json_error(message: str, status: int = 400):
+    return jsonify({"detail": message}), status
+
+
+def _get_upload_or_error():
     uploaded_file = request.files.get("file")
     if uploaded_file is None:
-        return jsonify({"detail": "Missing file field in multipart form data."}), 400
+        return None, _json_error("Missing file field in multipart form data.", 400)
+    return uploaded_file, None
 
+
+def _save_uploaded_file(uploaded_file):
     filename = uploaded_file.filename or "uploaded_note"
     suffix = Path(filename).suffix.lower()
-    if suffix not in {".pdf", ".txt"}:
-        return jsonify({"detail": "Only .pdf and .txt files are supported."}), 400
-
-    upload_id = str(uuid4())
-    save_path = settings.STUDY_NOTES_DIR / f"{upload_id}{suffix}"
+    if suffix not in ALLOWED_EXTENSIONS:
+        return None, None, _json_error("Only .pdf and .txt files are supported.", 400)
 
     content = uploaded_file.read()
     if not content:
-        return jsonify({"detail": "Uploaded file is empty."}), 400
+        return None, None, _json_error("Uploaded file is empty.", 400)
+
+    upload_id = str(uuid4())
+    save_path = settings.STUDY_NOTES_DIR / f"{upload_id}{suffix}"
     save_path.write_bytes(content)
+    return filename, save_path, None
+
+
+@app.post("/api/study-notes/summarize")
+def summarize_study_note():
+    uploaded_file, err = _get_upload_or_error()
+    if err:
+        return err
+
+    filename, save_path, err = _save_uploaded_file(uploaded_file)
+    if err:
+        return err
 
     try:
         service = StudyNoteSummarizer()
         result = service.summarize_and_store(file_path=save_path, filename=filename)
         return jsonify(result)
     except ValueError as exc:
-        return jsonify({"detail": str(exc)}), 400
+        return _json_error(str(exc), 400)
     except Exception as exc:  # noqa: BLE001
-        return jsonify({"detail": f"Failed to summarize note: {exc}"}), 500
+        return _json_error(f"Failed to summarize note: {exc}", 500)
 
 
 def _sse(event: str, data: dict[str, Any]) -> str:
@@ -84,23 +104,30 @@ class _StreamMarkdownCleaner:
         return tail.replace("**", "")
 
 
+def _emit_summary_stream(summary_iter, cleaner: _StreamMarkdownCleaner):
+    for item in summary_iter:
+        msg_type = item.get("type")
+        if msg_type == "token":
+            clean_text = cleaner.clean(item.get("text", ""))
+            if clean_text:
+                yield _sse("token", {"text": clean_text})
+        elif msg_type == "status":
+            yield _sse("status", {"message": item.get("message", "")})
+        elif msg_type == "done":
+            tail = cleaner.flush()
+            if tail:
+                yield _sse("token", {"text": tail})
+            yield _sse("done", {"ok": True})
+
+
 @app.post("/api/study-notes/summarize-stream")
 def summarize_study_note_stream():
-    uploaded_file = request.files.get("file")
-    if uploaded_file is None:
-        return jsonify({"detail": "Missing file field in multipart form data."}), 400
-
-    filename = uploaded_file.filename or "uploaded_note"
-    suffix = Path(filename).suffix.lower()
-    if suffix not in {".pdf", ".txt"}:
-        return jsonify({"detail": "Only .pdf and .txt files are supported."}), 400
-
-    upload_id = str(uuid4())
-    save_path = settings.STUDY_NOTES_DIR / f"{upload_id}{suffix}"
-    content = uploaded_file.read()
-    if not content:
-        return jsonify({"detail": "Uploaded file is empty."}), 400
-    save_path.write_bytes(content)
+    uploaded_file, err = _get_upload_or_error()
+    if err:
+        return err
+    filename, save_path, err = _save_uploaded_file(uploaded_file)
+    if err:
+        return err
 
     @stream_with_context
     def event_stream():
@@ -132,20 +159,7 @@ def summarize_study_note_stream():
                     "stored_to_pinecone": stored,
                 },
             )
-
-            for item in service.summarize_adaptive_stream(chunks):
-                msg_type = item.get("type")
-                if msg_type == "token":
-                    clean_text = cleaner.clean(item.get("text", ""))
-                    if clean_text:
-                        yield _sse("token", {"text": clean_text})
-                elif msg_type == "status":
-                    yield _sse("status", {"message": item.get("message", "")})
-                elif msg_type == "done":
-                    tail = cleaner.flush()
-                    if tail:
-                        yield _sse("token", {"text": tail})
-                    yield _sse("done", {"ok": True})
+            yield from _emit_summary_stream(service.summarize_adaptive_stream(chunks), cleaner)
         except Exception as exc:  # noqa: BLE001
             yield _sse("error", {"detail": f"Failed to summarize note: {exc}"})
 
@@ -181,6 +195,27 @@ def _load_note_records(store: PineconeStore, note_id: str) -> tuple[list[str], d
     record_ids.sort(key=_chunk_index)
     records = store.fetch_records(record_ids)
     return record_ids, records
+
+
+def _load_note_chunks(store: PineconeStore, note_id: str):
+    record_ids, records = _load_note_records(store, note_id)
+    if not record_ids:
+        return None, None, None
+
+    filename = "unknown"
+    chunk_texts: list[str] = []
+    for i, record_id in enumerate(record_ids):
+        raw = records.get(record_id)
+        if raw is None:
+            continue
+        normalized = _normalize_vector_record(record_id, raw)
+        metadata = normalized["metadata"]
+        if i == 0:
+            filename = metadata.get("filename", "unknown")
+        text = (metadata.get("chunk_text") or "").strip()
+        if text:
+            chunk_texts.append(text)
+    return record_ids, filename, chunk_texts
 
 
 @app.get("/api/study-notes")
@@ -289,26 +324,12 @@ def get_study_note_detail(note_id: str):
 def resummarize_study_note(note_id: str):
     try:
         store = PineconeStore()
-        record_ids, records = _load_note_records(store, note_id)
+        record_ids, filename, chunk_texts = _load_note_chunks(store, note_id)
         if not record_ids:
-            return jsonify({"detail": f"note_id '{note_id}' not found."}), 404
-
-        chunk_texts: list[str] = []
-        filename = "unknown"
-        for i, record_id in enumerate(record_ids):
-            raw = records.get(record_id)
-            if raw is None:
-                continue
-            normalized = _normalize_vector_record(record_id, raw)
-            metadata = normalized["metadata"]
-            if i == 0:
-                filename = metadata.get("filename", "unknown")
-            text = (metadata.get("chunk_text") or "").strip()
-            if text:
-                chunk_texts.append(text)
+            return _json_error(f"note_id '{note_id}' not found.", 404)
 
         if not chunk_texts:
-            return jsonify({"detail": "No chunk_text found for this note."}), 400
+            return _json_error("No chunk_text found for this note.", 400)
 
         summarizer = StudyNoteSummarizer()
         summary = summarizer.summarize_adaptive(chunk_texts)
@@ -322,7 +343,7 @@ def resummarize_study_note(note_id: str):
             }
         )
     except Exception as exc:  # noqa: BLE001
-        return jsonify({"detail": f"Failed to re-summarize note: {exc}"}), 500
+        return _json_error(f"Failed to re-summarize note: {exc}", 500)
 
 
 @app.post("/api/study-notes/<note_id>/resummarize-stream")
@@ -332,24 +353,10 @@ def resummarize_study_note_stream(note_id: str):
         try:
             cleaner = _StreamMarkdownCleaner()
             store = PineconeStore()
-            record_ids, records = _load_note_records(store, note_id)
+            record_ids, filename, chunk_texts = _load_note_chunks(store, note_id)
             if not record_ids:
                 yield _sse("error", {"detail": f"note_id '{note_id}' not found."})
                 return
-
-            chunk_texts: list[str] = []
-            filename = "unknown"
-            for i, record_id in enumerate(record_ids):
-                raw = records.get(record_id)
-                if raw is None:
-                    continue
-                normalized = _normalize_vector_record(record_id, raw)
-                metadata = normalized["metadata"]
-                if i == 0:
-                    filename = metadata.get("filename", "unknown")
-                text = (metadata.get("chunk_text") or "").strip()
-                if text:
-                    chunk_texts.append(text)
 
             if not chunk_texts:
                 yield _sse("error", {"detail": "No chunk_text found for this note."})
@@ -365,19 +372,7 @@ def resummarize_study_note_stream(note_id: str):
                 },
             )
             summarizer = StudyNoteSummarizer()
-            for item in summarizer.summarize_adaptive_stream(chunk_texts):
-                msg_type = item.get("type")
-                if msg_type == "token":
-                    clean_text = cleaner.clean(item.get("text", ""))
-                    if clean_text:
-                        yield _sse("token", {"text": clean_text})
-                elif msg_type == "status":
-                    yield _sse("status", {"message": item.get("message", "")})
-                elif msg_type == "done":
-                    tail = cleaner.flush()
-                    if tail:
-                        yield _sse("token", {"text": tail})
-                    yield _sse("done", {"ok": True})
+            yield from _emit_summary_stream(summarizer.summarize_adaptive_stream(chunk_texts), cleaner)
         except Exception as exc:  # noqa: BLE001
             yield _sse("error", {"detail": f"Failed to re-summarize note: {exc}"})
 
