@@ -13,20 +13,40 @@
 ## Project Structure
 
 ```
-**smart-study-app/**
-├── **backend/** # Flask Application (Python)
-│   ├── `main.py`               # App entry point & API routes
-│   ├── **services/** # Gemini API integration & NLP logic
-│   ├── **models/** # Pydantic schemas for data validation
-│   └── `requirements.txt`
-│
-├── **frontend/** # React Application (Vite + Tailwind)
-│   ├── **src/**
-│   │   ├── **components/** # UI logic for Flashcards & Quizzes
-│   │   └── **api/** # Axios/Fetch backend connectors
-│   └── `package.json`
-│
-└── `docker-compose.yml`        # Orchestrates both services
+﻿# Smart Study App
+
+## Project Structure
+
+smart-study-app/
+|-- .env.example                  # Env template (Gemini + Pinecone)
+|-- .env                          # Local secrets (ignored by git)
+|-- backend/
+|   |-- __init__.py
+|   |-- main.py                   # Flask app + /api/study-notes/summarize
+|   |-- config/
+|   |   |-- __init__.py
+|   |   `-- settings.py           # GEMINI_* + PINECONE_* + STUDY_NOTES_DIR
+|   |-- models/
+|   |   |-- __init__.py
+|   |   `-- study_note.py         # Response schema for summary endpoint
+|   |-- templates/
+|   |   `-- index.html            # Minimal upload UI for study note summary
+|   |-- services/
+|   |   |-- __init__.py
+|   |   |-- pinecone_store.py     # Unified Pinecone data manager
+|   |   `-- study_note_service.py # Chunking + Gemini summary + Pinecone upsert
+|   |-- data/
+|   |   `-- uploads_tmp/          # Temporary uploaded files (.pdf/.txt)
+|   |       `-- .gitkeep
+|   `-- requirements.txt
+|
+|-- frontend/                     # React Application (planned)
+|   |-- src/
+|   |   |-- components/
+|   |   `-- api/
+|   `-- package.json
+|
+`-- docker-compose.yml            # Orchestrates services (planned)
 ```
 ## 🚀 Key Features
 
