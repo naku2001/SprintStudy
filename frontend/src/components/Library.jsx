@@ -2,10 +2,11 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } fro
 import { RefreshCw, BookOpen } from 'lucide-react';
 import { listNotes, deleteNote, resummarizeStream } from '../api/studyNotes';
 import { consumeSse } from '../utils/sse';
+import { loadFromCache, saveToCache, removeFromCache } from '../utils/summaryCache';
 import NoteCard from './NoteCard';
 
 const Library = forwardRef(function Library(
-  { onStreaming, onStatus, onError, onMeta, onToken, onDone },
+  { onStreaming, onStatus, onError, onMeta, onToken, onDone, onShowCachedSummary },
   ref
 ) {
   const [notes, setNotes]     = useState([]);
@@ -28,18 +29,39 @@ const Library = forwardRef(function Library(
   useEffect(() => { refresh(); }, [refresh]);
   useImperativeHandle(ref, () => ({ refresh }), [refresh]);
 
-  async function handleResumarize(noteId) {
+  async function handleViewSummary(note) {
+    // Check localStorage first — show instantly if cached
+    const cached = loadFromCache(note.note_id);
+    if (cached) {
+      onShowCachedSummary(note.note_id, cached, {
+        note_id: note.note_id,
+        filename: note.filename,
+        source: 'cache',
+      });
+      return;
+    }
+
+    // No cache yet — generate it and cache the result
     onError('');
     onStreaming(true);
-    onStatus('Loading stored chunks…');
+    onStatus('Generating summary…');
     try {
-      const res = await resummarizeStream(noteId);
+      const res = await resummarizeStream(note.note_id);
+      let fullSummary = '';
       await consumeSse(res, (evt, payload) => {
         if (evt === 'status') onStatus(payload.message || '');
-        if (evt === 'meta')   onMeta(payload);
-        if (evt === 'token')  onToken(payload.text || '');
-        if (evt === 'done')   { onStatus('Done'); onDone(); }
-        if (evt === 'error')  throw new Error(payload.detail || 'Stream error.');
+        if (evt === 'meta')   onMeta({ ...payload, filename: note.filename });
+        if (evt === 'token') {
+          fullSummary += payload.text || '';
+          onToken(payload.text || '');
+        }
+        if (evt === 'done') {
+          // Cache the generated summary for next time
+          if (fullSummary) saveToCache(note.note_id, fullSummary);
+          onStatus('Done');
+          onDone();
+        }
+        if (evt === 'error') throw new Error(payload.detail || 'Stream error.');
       });
     } catch (err) {
       onError(err.message || String(err));
@@ -48,10 +70,11 @@ const Library = forwardRef(function Library(
     }
   }
 
-  async function handleDelete(noteId) {
+  async function handleDelete(note) {
     if (!window.confirm('Delete this note? Pinecone vectors and the local file will be removed.')) return;
     try {
-      await deleteNote(noteId);
+      await deleteNote(note.note_id);
+      removeFromCache(note.note_id); // clean up cached summary too
       await refresh();
     } catch (err) {
       onError(err.message);
@@ -111,9 +134,9 @@ const Library = forwardRef(function Library(
             key={note.note_id}
             note={note}
             index={i}
-            onResumarize={() => handleResumarize(note.note_id)}
-            onView={() => window.__viewNote?.(note.note_id)}
-            onDelete={() => handleDelete(note.note_id)}
+            isCached={!!loadFromCache(note.note_id)}
+            onViewSummary={() => handleViewSummary(note)}
+            onDelete={() => handleDelete(note)}
           />
         ))}
       </div>

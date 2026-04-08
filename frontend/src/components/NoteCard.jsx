@@ -4,7 +4,6 @@ function ActionBtn({ children, variant = 'default', onClick }) {
   const styles = {
     default: { color: '#9587c8', background: '#f5f2fc', border: '1px solid #e2daf5' },
     red:     { color: '#c0392b', background: 'rgba(192,57,43,0.06)', border: '1px solid rgba(192,57,43,0.2)' },
-    danger:  { color: '#9587c8', background: '#f5f2fc', border: '1px solid #e2daf5' },
   };
   return (
     <button
@@ -18,7 +17,7 @@ function ActionBtn({ children, variant = 'default', onClick }) {
   );
 }
 
-export default function NoteCard({ note, index, onView, onResumarize, onDelete }) {
+export default function NoteCard({ note, index, isCached, onViewSummary, onDelete }) {
   const date = note.created_at
     ? new Date(note.created_at).toLocaleDateString(undefined, {
         month: 'short', day: 'numeric', year: 'numeric',
@@ -38,18 +37,18 @@ export default function NoteCard({ note, index, onView, onResumarize, onDelete }
         </span>
       </div>
 
-      {/* Meta chips */}
-      <div className="flex flex-wrap gap-1.5 mb-3">
-        <Chip>{note.chunk_count} chunk{note.chunk_count !== 1 ? 's' : ''}</Chip>
-        {date && <Chip>{date}</Chip>}
-        {note.local_file_exists && <Chip hi>local</Chip>}
-      </div>
+      {/* Meta */}
+      {(date || isCached) && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {date && <Chip>{date}</Chip>}
+          {isCached && <Chip hi>summary saved</Chip>}
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex gap-1.5">
-        <ActionBtn variant="red"     onClick={onResumarize}>Re-summarize</ActionBtn>
-        <ActionBtn variant="default" onClick={onView}>View</ActionBtn>
-        <ActionBtn variant="danger"  onClick={onDelete}>Delete</ActionBtn>
+        <ActionBtn variant="red"     onClick={onViewSummary}>View Summary</ActionBtn>
+        <ActionBtn variant="default" onClick={onDelete}>Delete</ActionBtn>
       </div>
     </div>
   );

@@ -7,24 +7,20 @@ import Library from './components/Library';
 import NoteDetailModal from './components/NoteDetailModal';
 import FlashcardsWIP from './components/FlashcardsWIP';
 import { normalizeMarkdown } from './utils/markdown';
+import { saveToCache } from './utils/summaryCache';
 
 export default function App() {
-  // Page routing
-  const [page, setPage] = useState('home');
-
-  // Summary state
+  const [page, setPage]           = useState('home');
   const [summary, setSummary]     = useState('');
   const [streaming, setStreaming] = useState(false);
   const [error, setError]         = useState('');
   const [meta, setMeta]           = useState(null);
-
-  // Modal state
   const [viewNoteId, setViewNoteId] = useState(null);
 
-  const libraryRef = useRef(null);
-  const summaryBuf = useRef('');
+  const libraryRef    = useRef(null);
+  const summaryBuf    = useRef('');
+  const activeNoteId  = useRef(null); // tracks note_id of the in-progress stream
 
-  // Expose viewNote globally so NoteCard's onView can call it
   useEffect(() => {
     window.__viewNote = (noteId) => setViewNoteId(noteId);
     return () => { delete window.__viewNote; };
@@ -34,8 +30,17 @@ export default function App() {
     setStreaming(on);
     if (on) {
       summaryBuf.current = '';
+      activeNoteId.current = null;
       setSummary('');
       setMeta(null);
+    }
+  }, []);
+
+  const handleMeta = useCallback((metaData) => {
+    setMeta(metaData);
+    // Capture note_id so we can cache the summary when done
+    if (metaData?.note_id) {
+      activeNoteId.current = metaData.note_id;
     }
   }, []);
 
@@ -45,7 +50,19 @@ export default function App() {
   }, []);
 
   const handleDone = useCallback(() => {
+    // Persist the finished summary to localStorage
+    if (activeNoteId.current && summaryBuf.current) {
+      saveToCache(activeNoteId.current, summaryBuf.current);
+    }
     libraryRef.current?.refresh();
+  }, []);
+
+  // Called by Library when a cached summary should be displayed directly
+  const handleShowCachedSummary = useCallback((noteId, cachedSummary, noteMeta) => {
+    summaryBuf.current = cachedSummary;
+    setSummary(cachedSummary);
+    setMeta(noteMeta);
+    setError('');
   }, []);
 
   const isHome = page === 'home';
@@ -54,24 +71,18 @@ export default function App() {
     <div
       className="grid min-h-screen"
       style={{
-        gridTemplateRows: '60px 1fr',
+        gridTemplateRows: '64px 1fr',
         gridTemplateColumns: isHome ? '1fr 320px' : '1fr',
         gridTemplateAreas: isHome ? '"nav nav" "main shelf"' : '"nav" "main"',
       }}
     >
-      {/* ── Nav ─────────────────────────────────────────── */}
       <div style={{ gridArea: 'nav' }}>
         <Nav currentPage={page} onNavigate={setPage} />
       </div>
 
-      {/* ── Main content ────────────────────────────────── */}
       <main
         className="overflow-y-auto flex flex-col gap-6"
-        style={{
-          gridArea: 'main',
-          padding: isHome ? '40px' : '0',
-          background: '#faf9ff',
-        }}
+        style={{ gridArea: 'main', padding: isHome ? '40px' : '0', background: '#faf9ff' }}
       >
         {isHome ? (
           <>
@@ -79,15 +90,13 @@ export default function App() {
               onStreaming={handleStreaming}
               onStatus={() => {}}
               onError={setError}
-              onMeta={setMeta}
+              onMeta={handleMeta}
               onToken={handleToken}
               onDone={handleDone}
             />
 
             <ProcessBar visible={streaming} />
-
             <ErrorBox message={error} onDismiss={() => setError('')} />
-
             <SummaryPanel summary={summary} streaming={streaming} meta={meta} />
           </>
         ) : (
@@ -95,7 +104,6 @@ export default function App() {
         )}
       </main>
 
-      {/* ── Library sidebar (home only) ───────────────── */}
       {isHome && (
         <div style={{ gridArea: 'shelf' }}>
           <Library
@@ -103,14 +111,14 @@ export default function App() {
             onStreaming={handleStreaming}
             onStatus={() => {}}
             onError={setError}
-            onMeta={setMeta}
+            onMeta={handleMeta}
             onToken={handleToken}
             onDone={handleDone}
+            onShowCachedSummary={handleShowCachedSummary}
           />
         </div>
       )}
 
-      {/* ── Note detail modal ────────────────────────────── */}
       <NoteDetailModal
         noteId={viewNoteId}
         onClose={() => setViewNoteId(null)}
