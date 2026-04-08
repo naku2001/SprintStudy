@@ -20,6 +20,14 @@ from backend.services.pinecone_store import PineconeRecord, PineconeStore
 
 EMBED_MODEL = "models/gemini-embedding-001"
 GEN_MODEL = "models/gemini-2.5-flash"
+MARKDOWN_RULES = (
+    "Rules:\n"
+    "- Do not invent facts.\n"
+    "- Stay faithful to the provided note.\n"
+    "- Use Markdown headings with # and ## exactly as requested.\n"
+    "- Do not use bold markers like ** anywhere in output.\n"
+    "- Do not add any preface before the first heading.\n\n"
+)
 
 BULLET_RE = re.compile(
     r"""^\s*(?:[-*]|(?:\(?\d{1,3}\)?[.)])|(?:[A-Za-z][.)]))\s+"""
@@ -153,29 +161,7 @@ class StudyNoteSummarizer:
         return True
 
     def _summarize_once(self, chunks: list[str]) -> str:
-        joined = "\n\n".join([f"[CHUNK {i + 1}]\n{c}" for i, c in enumerate(chunks)])
-        prompt = (
-            "You are a careful study-note summarization assistant.\n"
-            "Write a concise final summary in English using clean Markdown.\n\n"
-            "Output format (Markdown):\n"
-            "# One-Sentence Overview\n"
-            "A single sentence.\n\n"
-            "## Key Takeaways\n"
-            "- 6-12 bullets\n\n"
-            "## Important Details\n"
-            "- numbers/dates/definitions/formulas if present\n\n"
-            "## Risks or Limitations\n"
-            "- only if mentioned\n\n"
-            "## 3 Quick Review Questions\n"
-            "1. ...\n2. ...\n3. ...\n\n"
-            "Rules:\n"
-            "- Do not invent facts.\n"
-            "- Stay faithful to the provided note.\n\n"
-            "- Use Markdown headings with # and ## exactly as requested.\n"
-            "- Do not use bold markers like ** anywhere in output.\n"
-            "- Do not add any preface before the first heading.\n\n"
-            f"EXCERPTS:\n{joined}"
-        )
+        prompt = self._build_single_pass_markdown_prompt(chunks)
         return self._generate_with_retry(prompt, temperature=0.2)
 
     def _batch_summarize_chunks(self, chunks: list[str], batch_size: int) -> list[str]:
@@ -195,29 +181,7 @@ class StudyNoteSummarizer:
         return summaries
 
     def _summarize_all(self, batch_summaries: list[str]) -> str:
-        combined = "\n\n".join(batch_summaries)
-        prompt = (
-            "You will receive batch summaries generated from one study note.\n"
-            "Write a final student-friendly summary in English using clean Markdown.\n\n"
-            "Output format (Markdown):\n"
-            "# One-Sentence Overview\n"
-            "A single sentence.\n\n"
-            "## Key Takeaways\n"
-            "- 6-12 bullets\n\n"
-            "## Topic Flow\n"
-            "1. ... in order\n\n"
-            "## Important Details\n"
-            "- numbers/dates/requirements/caveats\n\n"
-            "## 3 Quick Review Questions\n"
-            "1. ...\n2. ...\n3. ...\n\n"
-            "Rules:\n"
-            "- Be faithful to input text only.\n"
-            "- Do not hallucinate missing facts.\n\n"
-            "- Use Markdown headings with # and ## exactly as requested.\n"
-            "- Do not use bold markers like ** anywhere in output.\n"
-            "- Do not add any preface before the first heading.\n\n"
-            f"BATCH SUMMARIES:\n{combined}"
-        )
+        prompt = self._build_final_markdown_prompt(batch_summaries)
         return self._generate_with_retry(prompt, temperature=0.2)
 
     def summarize_adaptive_stream(self, chunks: list[str]):
@@ -258,12 +222,7 @@ class StudyNoteSummarizer:
             "- only if mentioned\n\n"
             "## 3 Quick Review Questions\n"
             "1. ...\n2. ...\n3. ...\n\n"
-            "Rules:\n"
-            "- Do not invent facts.\n"
-            "- Stay faithful to the provided note.\n\n"
-            "- Use Markdown headings with # and ## exactly as requested.\n"
-            "- Do not use bold markers like ** anywhere in output.\n"
-            "- Do not add any preface before the first heading.\n\n"
+            f"{MARKDOWN_RULES}"
             f"EXCERPTS:\n{joined}"
         )
 
@@ -283,12 +242,7 @@ class StudyNoteSummarizer:
             "- numbers/dates/requirements/caveats\n\n"
             "## 3 Quick Review Questions\n"
             "1. ...\n2. ...\n3. ...\n\n"
-            "Rules:\n"
-            "- Be faithful to input text only.\n"
-            "- Do not hallucinate missing facts.\n\n"
-            "- Use Markdown headings with # and ## exactly as requested.\n"
-            "- Do not use bold markers like ** anywhere in output.\n"
-            "- Do not add any preface before the first heading.\n\n"
+            f"{MARKDOWN_RULES}"
             f"BATCH SUMMARIES:\n{combined}"
         )
 
