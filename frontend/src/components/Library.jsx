@@ -1,10 +1,13 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, BookOpen } from 'lucide-react';
 import { listNotes, deleteNote, resummarizeStream } from '../api/studyNotes';
 import { consumeSse } from '../utils/sse';
 import NoteCard from './NoteCard';
 
-const Library = forwardRef(function Library({ onStreaming, onStatus, onError, onMeta, onToken, onDone }, ref) {
+const Library = forwardRef(function Library(
+  { onStreaming, onStatus, onError, onMeta, onToken, onDone },
+  ref
+) {
   const [notes, setNotes]     = useState([]);
   const [loading, setLoading] = useState(true);
   const [libError, setLibErr] = useState('');
@@ -23,15 +26,12 @@ const Library = forwardRef(function Library({ onStreaming, onStatus, onError, on
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
-
-  // Expose refresh() to parent via ref
   useImperativeHandle(ref, () => ({ refresh }), [refresh]);
 
   async function handleResumarize(noteId) {
     onError('');
     onStreaming(true);
     onStatus('Loading stored chunks…');
-
     try {
       const res = await resummarizeStream(noteId);
       await consumeSse(res, (evt, payload) => {
@@ -60,43 +60,46 @@ const Library = forwardRef(function Library({ onStreaming, onStatus, onError, on
 
   return (
     <aside
-      className="flex flex-col border-l overflow-hidden"
-      style={{ borderColor: 'var(--border)', background: '#13161f' }}
+      className="flex flex-col h-full border-l bg-surface"
+      style={{ borderColor: 'var(--border)' }}
     >
       {/* Header */}
       <div
-        className="flex items-center justify-between px-4 py-4 border-b flex-shrink-0"
-        style={{ borderColor: 'var(--border)' }}
+        className="flex items-center justify-between px-4 py-3.5 border-b flex-shrink-0"
+        style={{ borderColor: 'var(--border)', background: '#faf8f6' }}
       >
-        <span className="font-serif text-[18px] font-normal text-ink">Library</span>
+        <div className="flex items-center gap-2">
+          <BookOpen size={14} style={{ color: '#c0392b' }} />
+          <span className="font-serif text-[17px] font-semibold text-ink">Library</span>
+        </div>
         <button
           onClick={refresh}
-          className="w-8 h-8 rounded-lg border flex items-center justify-center text-muted hover:text-accent hover:border-accent/35 transition-colors"
-          style={{ borderColor: 'var(--border)', background: '#1a1e2a' }}
-          title="Refresh library"
+          className="w-7 h-7 rounded-lg border flex items-center justify-center text-muted hover:text-ink transition-colors"
+          style={{ borderColor: 'var(--border)', background: '#f7f5f2' }}
+          title="Refresh"
         >
-          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>
 
-      {/* Body */}
+      {/* Note list */}
       <div className="flex-1 overflow-y-auto p-2.5 flex flex-col gap-2">
         {loading && (
-          <div className="text-center py-12 text-[13px] text-muted">
-            <span className="block text-2xl mb-2.5 opacity-40">⏳</span>
+          <div className="text-center py-10 text-[13px] text-muted">
+            <div className="text-2xl mb-2 opacity-30">⏳</div>
             Loading…
           </div>
         )}
 
         {libError && !loading && (
-          <div className="text-center py-12 text-[13px] text-danger">
+          <div className="text-center py-10 text-[13px]" style={{ color: '#dc2626' }}>
             {libError}
           </div>
         )}
 
         {!loading && !libError && notes.length === 0 && (
-          <div className="text-center py-12 text-[13px] text-muted leading-relaxed">
-            <span className="block text-3xl mb-3 opacity-40">📚</span>
+          <div className="text-center py-10 text-[13px] text-muted leading-relaxed px-4">
+            <div className="text-3xl mb-3 opacity-25">📚</div>
             No notes yet.
             <br />
             Upload a document to begin.
