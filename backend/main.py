@@ -1,0 +1,426 @@
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+import json
+from typing import Any
+from uuid import uuid4
+
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from flask import Flask, Response, jsonify, request, stream_with_context
+from flask import render_template
+from flask_cors import CORS
+
+from backend.config.settings import settings
+from backend.services.pinecone_store import PineconeStore
+from backend.services.study_note_service import StudyNoteSummarizer
+
+app = Flask(__name__)
+CORS(app)
+
+
+@app.get("/")
+def index():
+    return render_template("index.html")
+
+
+@app.get("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+
+@app.post("/api/study-notes/summarize")
+def summarize_study_note():
+    uploaded_file = request.files.get("file")
+    if uploaded_file is None:
+        return jsonify({"detail": "Missing file field in multipart form data."}), 400
+
+    filename = uploaded_file.filename or "uploaded_note"
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".pdf", ".txt"}:
+        return jsonify({"detail": "Only .pdf and .txt files are supported."}), 400
+
+    upload_id = str(uuid4())
+    save_path = settings.STUDY_NOTES_DIR / f"{upload_id}{suffix}"
+
+    content = uploaded_file.read()
+    if not content:
+        return jsonify({"detail": "Uploaded file is empty."}), 400
+    save_path.write_bytes(content)
+
+    try:
+        service = StudyNoteSummarizer()
+        result = service.summarize_and_store(file_path=save_path, filename=filename)
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"detail": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"detail": f"Failed to summarize note: {exc}"}), 500
+
+
+def _sse(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+class _StreamMarkdownCleaner:
+    def __init__(self) -> None:
+        self._carry = ""
+
+    def clean(self, text: str) -> str:
+        if not text:
+            return ""
+        combined = self._carry + text
+        self._carry = ""
+        if combined.endswith("*"):
+            self._carry = "*"
+            combined = combined[:-1]
+        return combined.replace("**", "")
+
+    def flush(self) -> str:
+        tail = self._carry
+        self._carry = ""
+        return tail.replace("**", "")
+
+
+@app.post("/api/study-notes/summarize-stream")
+def summarize_study_note_stream():
+    uploaded_file = request.files.get("file")
+    if uploaded_file is None:
+        return jsonify({"detail": "Missing file field in multipart form data."}), 400
+
+    filename = uploaded_file.filename or "uploaded_note"
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".pdf", ".txt"}:
+        return jsonify({"detail": "Only .pdf and .txt files are supported."}), 400
+
+    upload_id = str(uuid4())
+    save_path = settings.STUDY_NOTES_DIR / f"{upload_id}{suffix}"
+    content = uploaded_file.read()
+    if not content:
+        return jsonify({"detail": "Uploaded file is empty."}), 400
+    save_path.write_bytes(content)
+
+    @stream_with_context
+    def event_stream():
+        try:
+            cleaner = _StreamMarkdownCleaner()
+            service = StudyNoteSummarizer()
+            yield _sse("status", {"message": "Extracting chunks..."})
+            chunks = service.extract_chunks(save_path)
+            if not chunks:
+                yield _sse("error", {"detail": "No usable text extracted from the uploaded file."})
+                return
+
+            yield _sse("status", {"message": f"Embedding {len(chunks)} chunks..."})
+            vectors = service.embed_chunks(chunks)
+            note_id = save_path.stem
+            stored = service.store_chunks(
+                note_id=note_id,
+                filename=filename,
+                stored_file=save_path.name,
+                chunks=chunks,
+                vectors=vectors,
+            )
+            yield _sse(
+                "meta",
+                {
+                    "note_id": note_id,
+                    "filename": filename,
+                    "chunks": len(chunks),
+                    "stored_to_pinecone": stored,
+                },
+            )
+
+            for item in service.summarize_adaptive_stream(chunks):
+                msg_type = item.get("type")
+                if msg_type == "token":
+                    clean_text = cleaner.clean(item.get("text", ""))
+                    if clean_text:
+                        yield _sse("token", {"text": clean_text})
+                elif msg_type == "status":
+                    yield _sse("status", {"message": item.get("message", "")})
+                elif msg_type == "done":
+                    tail = cleaner.flush()
+                    if tail:
+                        yield _sse("token", {"text": tail})
+                    yield _sse("done", {"ok": True})
+        except Exception as exc:  # noqa: BLE001
+            yield _sse("error", {"detail": f"Failed to summarize note: {exc}"})
+
+    return Response(event_stream(), mimetype="text/event-stream")
+
+
+def _chunk_index(record_id: str) -> int:
+    if ":" not in record_id:
+        return -1
+    idx_str = record_id.rsplit(":", 1)[1]
+    return int(idx_str) if idx_str.isdigit() else -1
+
+
+def _normalize_vector_record(record_id: str, record_obj: Any) -> dict[str, Any]:
+    metadata = getattr(record_obj, "metadata", None)
+    values = getattr(record_obj, "values", None)
+
+    if isinstance(record_obj, dict):
+        metadata = record_obj.get("metadata", metadata)
+        values = record_obj.get("values", values)
+
+    metadata = metadata or {}
+    values = values or []
+    return {
+        "id": record_id,
+        "metadata": metadata,
+        "values": values,
+    }
+
+
+def _load_note_records(store: PineconeStore, note_id: str) -> tuple[list[str], dict[str, Any]]:
+    record_ids = store.list_record_ids(prefix=f"{note_id}:")
+    record_ids.sort(key=_chunk_index)
+    records = store.fetch_records(record_ids)
+    return record_ids, records
+
+
+@app.get("/api/study-notes")
+def list_study_notes():
+    try:
+        store = PineconeStore()
+        record_ids = store.list_record_ids()
+        if not record_ids:
+            return jsonify({"notes": []})
+
+        groups: dict[str, list[str]] = {}
+        for record_id in record_ids:
+            note_id = record_id.split(":", 1)[0]
+            groups.setdefault(note_id, []).append(record_id)
+
+        first_ids = []
+        for note_id, ids in groups.items():
+            best_id = min(ids, key=_chunk_index)
+            first_ids.append((note_id, best_id))
+
+        first_records = store.fetch_records([item[1] for item in first_ids])
+        notes = []
+        for note_id, first_id in first_ids:
+            raw = first_records.get(first_id)
+            if raw is None:
+                continue
+            normalized = _normalize_vector_record(first_id, raw)
+            metadata = normalized["metadata"]
+
+            stored_file = metadata.get("stored_file", "")
+            local_path = str((settings.STUDY_NOTES_DIR / stored_file).resolve()) if stored_file else ""
+            local_exists = bool(stored_file) and (settings.STUDY_NOTES_DIR / stored_file).exists()
+
+            notes.append(
+                {
+                    "note_id": note_id,
+                    "filename": metadata.get("filename", "unknown"),
+                    "created_at": metadata.get("created_at"),
+                    "chunk_count": len(groups.get(note_id, [])),
+                    "local_file": stored_file,
+                    "local_file_path": local_path,
+                    "local_file_exists": local_exists,
+                }
+            )
+
+        notes.sort(key=lambda n: n.get("created_at") or "", reverse=True)
+        return jsonify({"notes": notes})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"detail": f"Failed to list notes: {exc}"}), 500
+
+
+@app.get("/api/study-notes/<note_id>")
+def get_study_note_detail(note_id: str):
+    include_full_values = request.args.get("include_full_values", "false").lower() == "true"
+    try:
+        store = PineconeStore()
+        record_ids, records = _load_note_records(store, note_id)
+        if not record_ids:
+            return jsonify({"detail": f"note_id '{note_id}' not found."}), 404
+
+        chunks = []
+        for record_id in record_ids:
+            raw = records.get(record_id)
+            if raw is None:
+                continue
+            normalized = _normalize_vector_record(record_id, raw)
+            metadata = normalized["metadata"]
+            values = normalized["values"]
+            item = {
+                "record_id": record_id,
+                "chunk_index": metadata.get("chunk_index", _chunk_index(record_id)),
+                "chunk_text": metadata.get("chunk_text", ""),
+                "embedding_dim": len(values),
+                "embedding_preview": values[:8],
+            }
+            if include_full_values:
+                item["embedding_values"] = values
+            chunks.append(item)
+
+        first_meta = chunks[0] if chunks else {}
+        filename = ""
+        stored_file = ""
+        if record_ids:
+            first_raw = records.get(record_ids[0])
+            if first_raw is not None:
+                first_norm = _normalize_vector_record(record_ids[0], first_raw)
+                filename = first_norm["metadata"].get("filename", "")
+                stored_file = first_norm["metadata"].get("stored_file", "")
+
+        return jsonify(
+            {
+                "note_id": note_id,
+                "filename": filename,
+                "stored_file": stored_file,
+                "chunk_count": len(chunks),
+                "chunks": chunks,
+                "include_full_values": include_full_values,
+                "sample_chunk_index": first_meta.get("chunk_index"),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"detail": f"Failed to get note detail: {exc}"}), 500
+
+
+@app.post("/api/study-notes/<note_id>/resummarize")
+def resummarize_study_note(note_id: str):
+    try:
+        store = PineconeStore()
+        record_ids, records = _load_note_records(store, note_id)
+        if not record_ids:
+            return jsonify({"detail": f"note_id '{note_id}' not found."}), 404
+
+        chunk_texts: list[str] = []
+        filename = "unknown"
+        for i, record_id in enumerate(record_ids):
+            raw = records.get(record_id)
+            if raw is None:
+                continue
+            normalized = _normalize_vector_record(record_id, raw)
+            metadata = normalized["metadata"]
+            if i == 0:
+                filename = metadata.get("filename", "unknown")
+            text = (metadata.get("chunk_text") or "").strip()
+            if text:
+                chunk_texts.append(text)
+
+        if not chunk_texts:
+            return jsonify({"detail": "No chunk_text found for this note."}), 400
+
+        summarizer = StudyNoteSummarizer()
+        summary = summarizer.summarize_adaptive(chunk_texts)
+        return jsonify(
+            {
+                "note_id": note_id,
+                "filename": filename,
+                "chunks": len(chunk_texts),
+                "summary": summary,
+                "source": "pinecone_stored_chunks",
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"detail": f"Failed to re-summarize note: {exc}"}), 500
+
+
+@app.post("/api/study-notes/<note_id>/resummarize-stream")
+def resummarize_study_note_stream(note_id: str):
+    @stream_with_context
+    def event_stream():
+        try:
+            cleaner = _StreamMarkdownCleaner()
+            store = PineconeStore()
+            record_ids, records = _load_note_records(store, note_id)
+            if not record_ids:
+                yield _sse("error", {"detail": f"note_id '{note_id}' not found."})
+                return
+
+            chunk_texts: list[str] = []
+            filename = "unknown"
+            for i, record_id in enumerate(record_ids):
+                raw = records.get(record_id)
+                if raw is None:
+                    continue
+                normalized = _normalize_vector_record(record_id, raw)
+                metadata = normalized["metadata"]
+                if i == 0:
+                    filename = metadata.get("filename", "unknown")
+                text = (metadata.get("chunk_text") or "").strip()
+                if text:
+                    chunk_texts.append(text)
+
+            if not chunk_texts:
+                yield _sse("error", {"detail": "No chunk_text found for this note."})
+                return
+
+            yield _sse(
+                "meta",
+                {
+                    "note_id": note_id,
+                    "filename": filename,
+                    "chunks": len(chunk_texts),
+                    "source": "pinecone_stored_chunks",
+                },
+            )
+            summarizer = StudyNoteSummarizer()
+            for item in summarizer.summarize_adaptive_stream(chunk_texts):
+                msg_type = item.get("type")
+                if msg_type == "token":
+                    clean_text = cleaner.clean(item.get("text", ""))
+                    if clean_text:
+                        yield _sse("token", {"text": clean_text})
+                elif msg_type == "status":
+                    yield _sse("status", {"message": item.get("message", "")})
+                elif msg_type == "done":
+                    tail = cleaner.flush()
+                    if tail:
+                        yield _sse("token", {"text": tail})
+                    yield _sse("done", {"ok": True})
+        except Exception as exc:  # noqa: BLE001
+            yield _sse("error", {"detail": f"Failed to re-summarize note: {exc}"})
+
+    return Response(event_stream(), mimetype="text/event-stream")
+
+
+@app.delete("/api/study-notes/<note_id>")
+def delete_study_note(note_id: str):
+    try:
+        store = PineconeStore()
+        record_ids, _ = _load_note_records(store, note_id)
+        if not record_ids:
+            return jsonify({"detail": f"note_id '{note_id}' not found."}), 404
+
+        stored_files = set()
+        records = store.fetch_records(record_ids[:1])
+        if record_ids:
+            first_raw = records.get(record_ids[0])
+            if first_raw is not None:
+                first_norm = _normalize_vector_record(record_ids[0], first_raw)
+                stored_file = first_norm["metadata"].get("stored_file")
+                if stored_file:
+                    stored_files.add(stored_file)
+
+        store.delete_by_note_id(note_id)
+
+        deleted_local_files = []
+        for stored_file in stored_files:
+            target = settings.STUDY_NOTES_DIR / stored_file
+            if target.exists() and target.is_file():
+                target.unlink()
+                deleted_local_files.append(str(target.resolve()))
+
+        return jsonify(
+            {
+                "note_id": note_id,
+                "deleted_pinecone_records": len(record_ids),
+                "deleted_local_files": deleted_local_files,
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"detail": f"Failed to delete note: {exc}"}), 500
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8000, debug=True)
