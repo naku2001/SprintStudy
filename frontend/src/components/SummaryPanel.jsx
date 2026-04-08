@@ -7,7 +7,7 @@ function Chip({ children, hi }) {
       style={
         hi
           ? { color: '#c0392b', background: 'rgba(192,57,43,0.07)', borderColor: 'rgba(192,57,43,0.2)' }
-          : { color: '#78716c', background: '#f7f5f2', borderColor: 'var(--border)' }
+          : { color: '#9587c8', background: '#f5f2fc', borderColor: '#e2daf5' }
       }
     >
       {children}
@@ -23,10 +23,10 @@ export default function SummaryPanel({ summary, streaming, meta }) {
       className="flex flex-col rounded-2xl border bg-surface overflow-hidden animate-fade-up"
       style={{ borderColor: 'var(--border)', boxShadow: 'var(--shadow-sm)' }}
     >
-      {/* Header bar */}
+      {/* Header */}
       <div
         className="flex items-center justify-between px-6 py-3 border-b"
-        style={{ borderColor: 'var(--border)', background: '#faf8f6' }}
+        style={{ borderColor: 'var(--border)', background: '#f8f5ff' }}
       >
         <div className="flex items-center gap-2">
           <div className="w-[3px] h-4 rounded-full" style={{ background: '#c0392b' }} />
@@ -41,7 +41,7 @@ export default function SummaryPanel({ summary, streaming, meta }) {
         </div>
       </div>
 
-      {/* Content */}
+      {/* Body */}
       <div
         className={`px-8 py-7 max-h-[640px] overflow-y-auto summary-md ${streaming ? 'typing-cursor' : ''}`}
         dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(summary) }}

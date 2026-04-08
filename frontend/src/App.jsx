@@ -70,6 +70,7 @@ export default function App() {
         style={{
           gridArea: 'main',
           padding: isHome ? '40px' : '0',
+          background: '#faf9ff',
         }}
       >
         {isHome ? (

@@ -2,27 +2,14 @@ import { FileText } from 'lucide-react';
 
 function ActionBtn({ children, variant = 'default', onClick }) {
   const styles = {
-    default: {
-      color: '#78716c',
-      background: '#f7f5f2',
-      border: '1px solid var(--border)',
-    },
-    red: {
-      color: '#c0392b',
-      background: 'rgba(192,57,43,0.06)',
-      border: '1px solid rgba(192,57,43,0.2)',
-    },
-    danger: {
-      color: '#78716c',
-      background: '#f7f5f2',
-      border: '1px solid var(--border)',
-    },
+    default: { color: '#9587c8', background: '#f5f2fc', border: '1px solid #e2daf5' },
+    red:     { color: '#c0392b', background: 'rgba(192,57,43,0.06)', border: '1px solid rgba(192,57,43,0.2)' },
+    danger:  { color: '#9587c8', background: '#f5f2fc', border: '1px solid #e2daf5' },
   };
-
   return (
     <button
       type="button"
-      className="flex-1 text-center text-[11.5px] font-medium py-1.5 rounded-lg transition-all duration-150 hover:opacity-80 active:scale-95"
+      className="flex-1 text-center text-[11.5px] font-medium py-1.5 rounded-lg transition-all duration-150 hover:opacity-75 active:scale-95"
       style={styles[variant]}
       onClick={onClick}
     >
@@ -53,22 +40,9 @@ export default function NoteCard({ note, index, onView, onResumarize, onDelete }
 
       {/* Meta chips */}
       <div className="flex flex-wrap gap-1.5 mb-3">
-        <span className="font-mono text-[10.5px] text-muted px-2 py-0.5 rounded-md border"
-              style={{ borderColor: 'var(--border)', background: '#f7f5f2' }}>
-          {note.chunk_count} chunk{note.chunk_count !== 1 ? 's' : ''}
-        </span>
-        {date && (
-          <span className="font-mono text-[10.5px] text-muted px-2 py-0.5 rounded-md border"
-                style={{ borderColor: 'var(--border)', background: '#f7f5f2' }}>
-            {date}
-          </span>
-        )}
-        {note.local_file_exists && (
-          <span className="font-mono text-[10.5px] font-medium px-2 py-0.5 rounded-md border"
-                style={{ color: '#c0392b', borderColor: 'rgba(192,57,43,0.2)', background: 'rgba(192,57,43,0.06)' }}>
-            local
-          </span>
-        )}
+        <Chip>{note.chunk_count} chunk{note.chunk_count !== 1 ? 's' : ''}</Chip>
+        {date && <Chip>{date}</Chip>}
+        {note.local_file_exists && <Chip hi>local</Chip>}
       </div>
 
       {/* Actions */}
@@ -78,5 +52,20 @@ export default function NoteCard({ note, index, onView, onResumarize, onDelete }
         <ActionBtn variant="danger"  onClick={onDelete}>Delete</ActionBtn>
       </div>
     </div>
+  );
+}
+
+function Chip({ children, hi }) {
+  return (
+    <span
+      className="font-mono text-[10.5px] font-medium px-2 py-0.5 rounded-md border"
+      style={
+        hi
+          ? { color: '#c0392b', borderColor: 'rgba(192,57,43,0.2)', background: 'rgba(192,57,43,0.06)' }
+          : { color: '#9587c8', borderColor: '#e2daf5', background: '#f5f2fc' }
+      }
+    >
+      {children}
+    </span>
   );
 }

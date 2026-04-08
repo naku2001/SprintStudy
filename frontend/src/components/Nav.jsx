@@ -2,7 +2,7 @@ export default function Nav({ currentPage, onNavigate }) {
   return (
     <nav
       className="sticky top-0 z-50 flex items-center justify-between px-8 h-[64px] bg-surface border-b"
-      style={{ borderColor: 'var(--border)', boxShadow: '0 1px 0 rgba(0,0,0,0.04)' }}
+      style={{ borderColor: 'var(--border)', boxShadow: '0 1px 0 rgba(45,27,105,0.06)' }}
     >
       {/* Brand */}
       <button
@@ -23,7 +23,7 @@ export default function Nav({ currentPage, onNavigate }) {
         </div>
       </button>
 
-      {/* Nav + badge */}
+      {/* Nav links + badge */}
       <div className="flex items-center gap-1">
         <NavLink active={currentPage === 'home'} onClick={() => onNavigate('home')}>
           Summarize

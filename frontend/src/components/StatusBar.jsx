@@ -12,15 +12,18 @@ export function ProcessBar({ visible }) {
         <span className="text-[11px] font-mono text-muted">AI at work</span>
       </div>
 
-      {/* Indeterminate shimmer */}
-      <div className="h-1 rounded-full overflow-hidden bg-surface2">
+      {/* Indeterminate shimmer bar */}
+      <div
+        className="relative h-1.5 rounded-full overflow-hidden"
+        style={{ background: '#ede8f8' }}
+      >
         <div
-          className="absolute h-full rounded-full"
           style={{
+            position: 'absolute',
+            top: 0, bottom: 0,
             width: '40%',
             background: 'linear-gradient(90deg, transparent, #c0392b, transparent)',
             animation: 'shimmer 1.6s ease-in-out infinite',
-            position: 'relative',
           }}
         />
       </div>
@@ -30,7 +33,6 @@ export function ProcessBar({ visible }) {
           0%   { left: -45%; }
           100% { left: 110%; }
         }
-        div.shimmer-track { position: relative; }
       `}</style>
     </div>
   );
@@ -41,14 +43,14 @@ export function ErrorBox({ message, onDismiss }) {
   return (
     <div
       className="flex items-start gap-3 rounded-2xl border px-5 py-4 text-[13.5px] animate-fade-up bg-surface"
-      style={{ borderColor: 'rgba(220,38,38,0.25)', background: 'rgba(220,38,38,0.04)' }}
+      style={{ borderColor: 'rgba(192,57,43,0.25)', background: 'rgba(192,57,43,0.04)' }}
     >
-      <AlertCircle size={15} className="flex-shrink-0 mt-0.5" style={{ color: '#dc2626' }} />
-      <span className="flex-1" style={{ color: '#b91c1c' }}>{message}</span>
+      <AlertCircle size={15} className="flex-shrink-0 mt-0.5" style={{ color: '#c0392b' }} />
+      <span className="flex-1" style={{ color: '#c0392b' }}>{message}</span>
       {onDismiss && (
         <button
           onClick={onDismiss}
-          className="text-muted hover:text-danger transition-colors text-xs flex-shrink-0"
+          className="text-muted text-xs flex-shrink-0 hover:opacity-70 transition-opacity"
         >
           ✕
         </button>

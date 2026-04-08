@@ -1,139 +1,149 @@
-# 💡 SprintStudy: Your AI-Native Study Companion
+# Njere — AI Study Companion
 
-[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://njere.streamlit.app)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+**Njere** means *Wisdom* in Shona. The name feels right because the whole point of this app is to take a wall of academic text and turn it into something you can actually learn from.
 
-**Njere** (Shona for *Wisdom*) is a smart study ecosystem designed to bridge the gap between raw information and deep academic understanding. Built with **Applied AI**, it goes beyond simple note-taking by leveraging NLP to provide context-aware tutoring and knowledge retention tools.
+Upload a PDF or a text file, and Njere reads it, breaks it into chunks, embeds each chunk with Google Gemini, stores everything in Pinecone, then streams a structured summary back to you — key takeaways, topic flow, review questions and all. It's built to feel fast and to stay out of your way.
 
 ---
 
-# Smart Study App
+## What it does right now
 
-## Project Structure
+- **Smart summarization** — drop in a `.pdf` or `.txt`, get a clean structured summary streamed back in real time. No waiting for the full thing to generate before you see anything.
+- **Persistent library** — every note you summarize gets chunked, embedded, and stored in Pinecone. Your library builds up over time.
+- **Re-summarize anytime** — stored notes can be re-summarized without re-uploading the file. The chunks live in Pinecone with their metadata, so we just pull them back and run the model again.
+- **Note detail view** — you can inspect individual chunks and see the embedding vector previews for any stored note.
+
+## What's being built
+
+- **Flashcards** *(35% done)* — auto-generate Anki-style active recall cards from your summaries. Q&A pairs and spaced repetition are part of the plan too.
+- **Performance tracking** — keep tabs on what you've reviewed, what you're weak on, and how your retention is improving over time.
+
+---
+
+## Tech stack
+
+| Layer | What we use |
+|---|---|
+| Backend | Python + Flask |
+| AI — generation | Google Gemini 2.5 Flash |
+| AI — embeddings | Gemini Embedding (`gemini-embedding-001`, 768-dim) |
+| Vector store | Pinecone (serverless, AWS) |
+| PDF parsing | PyMuPDF |
+| Streaming | Server-Sent Events (SSE) |
+| Frontend | React 18 + Vite 5 + Tailwind CSS 3 |
+| Fonts | Playfair Display · Plus Jakarta Sans · IBM Plex Mono |
+
+---
+
+## Project structure
 
 ```
-﻿# Smart Study App
-
-## Project Structure
-
-smart-study-app/
-|-- .env.example                  # Env template (Gemini + Pinecone)
-|-- .env                          # Local secrets (ignored by git)
-|-- backend/
-|   |-- __init__.py
-|   |-- main.py                   # Flask app + /api/study-notes/summarize
-|   |-- config/
-|   |   |-- __init__.py
-|   |   `-- settings.py           # GEMINI_* + PINECONE_* + STUDY_NOTES_DIR
-|   |-- models/
-|   |   |-- __init__.py
-|   |   `-- study_note.py         # Response schema for summary endpoint
-|   |-- templates/
-|   |   `-- index.html            # Minimal upload UI for study note summary
-|   |-- services/
-|   |   |-- __init__.py
-|   |   |-- pinecone_store.py     # Unified Pinecone data manager
-|   |   `-- study_note_service.py # Chunking + Gemini summary + Pinecone upsert
-|   |-- data/
-|   |   `-- uploads_tmp/          # Temporary uploaded files (.pdf/.txt)
-|   |       `-- .gitkeep
-|   `-- requirements.txt
-|
-|-- frontend/                     # React Application (planned)
-|   |-- src/
-|   |   |-- components/
-|   |   `-- api/
-|   `-- package.json
-|
-`-- docker-compose.yml            # Orchestrates services (planned)
+njere/
+├── backend/
+│   ├── main.py                   # Flask app and all API routes
+│   ├── config/
+│   │   └── settings.py           # Env config (Gemini + Pinecone)
+│   ├── models/
+│   │   └── study_note.py         # Pydantic response schema
+│   ├── services/
+│   │   ├── study_note_service.py # Core pipeline: chunk → embed → store → summarize
+│   │   └── pinecone_store.py     # Pinecone read/write/delete
+│   ├── templates/
+│   │   └── index.html            # Fallback HTML UI (served by Flask)
+│   ├── data/
+│   │   └── uploads_tmp/          # Temp storage for uploaded files
+│   └── requirements.txt
+│
+├── frontend/                     # React app (the main UI)
+│   ├── src/
+│   │   ├── App.jsx               # Root layout + page routing
+│   │   ├── api/studyNotes.js     # All API calls to the backend
+│   │   ├── utils/
+│   │   │   ├── sse.js            # SSE stream reader
+│   │   │   └── markdown.js       # Markdown normalizer + HTML renderer
+│   │   └── components/
+│   │       ├── Nav.jsx
+│   │       ├── UploadZone.jsx
+│   │       ├── SummaryPanel.jsx
+│   │       ├── Library.jsx
+│   │       ├── NoteCard.jsx
+│   │       ├── NoteDetailModal.jsx
+│   │       ├── StatusBar.jsx
+│   │       └── FlashcardsWIP.jsx
+│   ├── package.json
+│   └── vite.config.js            # Proxies /api/* → Flask on :8000
+│
+├── .env                          # Your secrets (never commit this)
+├── .env.example                  # Template — copy this to .env to get started
+└── README.md
 ```
-## 🚀 Key Features
 
-* **Smart Summarization:** Transform dense academic papers or lecture notes into concise, digestible insights using state-of-the-art LLMs.
-* **Contextual Q&A:** An AI tutor that understands your specific course materials to answer complex questions in real-time.
-* **Automated Knowledge Graphs:** Visualize connections between different topics to build a stronger mental model.
-* **Flashcard Generation:** Convert notes into active-recall sets (Anki-style) automatically.
-* **Optimized Performance:** Built with model optimization techniques (Quantization/Pruning) for fast inference and low-latency responses.
+---
 
-## 🛠️ Tech Stack
+## Getting started
 
-* **Frontend:** [Streamlit](https://streamlit.io/) for a clean, mobile-friendly user interface.
-* **Core AI:** [PyTorch](https://pytorch.org/) & [Hugging Face Transformers](https://huggingface.co/).
-* **Data Layer:** [Pinecone](https://www.pinecone.io/) as the unified vector+metadata store for notes, summaries, Q&A context, and flashcards.
-* **Optimization:** Model quantization for efficient deployment.
+### 1. Clone and configure
 
-## 📦 Installation & Setup
+```bash
+git clone https://github.com/your-username/njere.git
+cd njere
+cp .env.example .env
+```
 
-1. **Clone the repository:**
-   ```bash
-   git clone [https://github.com/sjohannes/njere.git](https://github.com/sjohannes/njere.git)
-   cd njere
+Open `.env` and fill in your keys:
 
+```env
+GEMINI_API_KEY=your_key_here
+GEMINI_MODEL=gemini-2.5-flash
+PINECONE_API_KEY=your_key_here
+PINECONE_INDEX_NAME=sprintstudy-main
+PINECONE_NAMESPACE=default
+PINECONE_CLOUD=aws
+PINECONE_REGION=us-east-1
+EMBEDDING_DIMENSION=768
+```
 
-   
-
-## Study Note Summary API (Implemented)
-
-### 1) Install backend dependencies
+### 2. Run the backend
 
 ```bash
 pip install -r backend/requirements.txt
-```
-
-### 2) Configure environment
-
-Update `.env` with:
-
-- `GEMINI_API_KEY`
-- `GEMINI_MODEL=gemini-2.5-flash`
-- `PINECONE_API_KEY`
-- `PINECONE_INDEX_NAME`
-- `PINECONE_NAMESPACE`
-- `PINECONE_CLOUD`
-- `PINECONE_REGION`
-- `EMBEDDING_DIMENSION`
-
-### 3) Run API
-
-```bash
 python backend/main.py
+# → running on http://localhost:8000
 ```
 
-### 4) Open web UI
-
-Open:
-
-`http://localhost:8000/`
-
-Then upload one `.pdf` or `.txt` and click **Summarize**.
-
-### 5) (Optional) Call summarize endpoint directly
-
-`POST /api/study-notes/summarize` with multipart file upload (`.pdf` or `.txt`).
-
-For streaming markdown output (recommended):
-
-`POST /api/study-notes/summarize-stream`
-
-Example:
+### 3. Run the frontend
 
 ```bash
-curl -X POST "http://localhost:8000/api/study-notes/summarize" \
-  -H "accept: application/json" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@./your_note.pdf"
+cd frontend
+npm install
+npm run dev
+# → running on http://localhost:3000
 ```
 
-### 6) Manage stored notes
+The Vite dev server automatically proxies all `/api/*` requests to the Flask backend, so you don't need to touch CORS or configure anything.
 
-- `GET /api/study-notes`  
-  List stored notes (filename, note_id, chunk count, local file existence).
-- `GET /api/study-notes/<note_id>`  
-  View chunks and embedding preview for one note.
-- `POST /api/study-notes/<note_id>/resummarize`  
-  Re-run summary generation using stored chunks in Pinecone (no re-upload needed).
-- `POST /api/study-notes/<note_id>/resummarize-stream`  
-  Re-run summary generation as streaming markdown output.
-- `DELETE /api/study-notes/<note_id>`  
-  Delete Pinecone vectors and local uploaded file for one note.
+---
+
+## API reference
+
+| Method | Endpoint | What it does |
+|---|---|---|
+| `POST` | `/api/study-notes/summarize-stream` | Upload a file, get a streaming SSE summary |
+| `GET` | `/api/study-notes` | List all stored notes |
+| `GET` | `/api/study-notes/:id` | Get chunks + embedding preview for one note |
+| `POST` | `/api/study-notes/:id/resummarize-stream` | Re-summarize from stored Pinecone chunks |
+| `DELETE` | `/api/study-notes/:id` | Delete note — removes Pinecone vectors + local file |
+
+Streaming endpoints emit `event: status`, `event: meta`, `event: token`, and `event: done` SSE events. The frontend consumes these to render the summary progressively as it arrives.
+
+---
+
+## A note on the Pinecone index
+
+If you already have a Pinecone index under the same name with a different dimension (e.g. 1024 from a previous project), the app will detect the mismatch on startup, delete the old index, and recreate it at 768 dimensions. You'll lose whatever was in it, but since the dimension would've been incompatible anyway, there's nothing to save.
+
+---
+
+## License
+
+MIT
