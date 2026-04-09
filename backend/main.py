@@ -73,6 +73,46 @@ def _get_generation_overrides() -> tuple[str | None, str | None]:
     return provider, model
 
 
+def _resolve_unique_filename(original_filename: str) -> str:
+    if not settings.PINECONE_API_KEY:
+        return original_filename
+    try:
+        store = PineconeStore()
+        record_ids = store.list_record_ids()
+        chunk_ids = [rid for rid in record_ids if _is_chunk_record_id(rid)]
+        if not chunk_ids:
+            return original_filename
+        first_by_note: dict[str, str] = {}
+        for rid in chunk_ids:
+            note_id = rid.split(":", 1)[0]
+            if note_id not in first_by_note or _chunk_index(rid) < _chunk_index(first_by_note[note_id]):
+                first_by_note[note_id] = rid
+        first_records = store.fetch_records(list(first_by_note.values()))
+        existing_lower: set[str] = set()
+        for rid in first_by_note.values():
+            raw = first_records.get(rid)
+            if raw is None:
+                continue
+            normalized = _normalize_vector_record(rid, raw)
+            name = str(normalized["metadata"].get("filename", "")).strip()
+            if name:
+                existing_lower.add(name.lower())
+        candidate = original_filename.strip() or "uploaded_note"
+        if candidate.lower() not in existing_lower:
+            return candidate
+        p = Path(candidate)
+        stem = p.stem or "uploaded_note"
+        suffix = p.suffix
+        n = 1
+        while True:
+            trial = f"{stem}({n}){suffix}"
+            if trial.lower() not in existing_lower:
+                return trial
+            n += 1
+    except Exception:
+        return original_filename
+
+
 @app.post("/api/study-notes/summarize")
 def summarize_study_note():
     uploaded_file, err = _get_upload_or_error()
@@ -82,6 +122,7 @@ def summarize_study_note():
     filename, save_path, err = _save_uploaded_file(uploaded_file)
     if err:
         return err
+    filename = _resolve_unique_filename(filename)
     embedding_provider, embedding_model = _get_embedding_overrides()
     generation_provider, generation_model = _get_generation_overrides()
 
@@ -163,6 +204,7 @@ def summarize_study_note_stream():
     filename, save_path, err = _save_uploaded_file(uploaded_file)
     if err:
         return err
+    filename = _resolve_unique_filename(filename)
     embedding_provider, embedding_model = _get_embedding_overrides()
     generation_provider, generation_model = _get_generation_overrides()
 

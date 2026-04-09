@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { UploadCloud, FileText } from 'lucide-react';
-import { summarizeStream } from '../api/studyNotes';
+import { listNotes, summarizeStream } from '../api/studyNotes';
 import { consumeSse } from '../utils/sse';
 
 export default function UploadZone({ onStreaming, onStatus, onError, onMeta, onToken, onDone }) {
@@ -43,11 +43,41 @@ export default function UploadZone({ onStreaming, onStatus, onError, onMeta, onT
     setFile(f);
   }
 
+  function nextFilenameWithSuffix(name, existingNames) {
+    const lowerSet = new Set(existingNames.map((n) => String(n || '').toLowerCase()));
+    if (!lowerSet.has(name.toLowerCase())) return name;
+    const dot = name.lastIndexOf('.');
+    const stem = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : '';
+    let n = 1;
+    while (true) {
+      const candidate = `${stem}(${n})${ext}`;
+      if (!lowerSet.has(candidate.toLowerCase())) return candidate;
+      n += 1;
+    }
+  }
+
   async function handleSubmit(e) {
     e.stopPropagation();
     if (!file) { onError('Please select a .pdf or .txt file first.'); return; }
 
     onError('');
+
+    try {
+      const notes = await listNotes();
+      const existing = (notes || []).map((n) => n.filename).filter(Boolean);
+      const hasDuplicate = existing.some((n) => n.toLowerCase() === file.name.toLowerCase());
+      if (hasDuplicate) {
+        const nextName = nextFilenameWithSuffix(file.name, existing);
+        const ok = window.confirm(
+          `A file named "${file.name}" already exists.\n\nUpload anyway? It will be saved as "${nextName}".`
+        );
+        if (!ok) return;
+      }
+    } catch {
+      // If pre-check fails, do not block upload; backend still enforces unique naming.
+    }
+
     onStreaming(true);
     onStatus('Uploading...');
 
