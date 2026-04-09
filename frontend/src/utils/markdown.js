@@ -16,25 +16,33 @@ export function normalizeMarkdown(text) {
   raw = raw
     .replace(/\s*(#{2,3})\s*/g, '\n$1 ')
     .replace(/\n{3,}/g, '\n\n');
+
   const map = {
-    'one-sentence overview':    '# One-Sentence Overview',
-    'key takeaways':            '## Key Takeaways',
-    'topic flow':               '## Topic Flow',
-    'important details':        '## Important Details',
-    'risks or limitations':     '## Risks or Limitations',
+    'one-sentence overview': '# One-Sentence Overview',
+    'key takeaways': '## Key Takeaways',
+    'topic flow': '## Topic Flow',
+    'important details': '## Important Details',
+    'risks or limitations': '## Risks or Limitations',
     '3 quick review questions': '## Quick Review Questions',
-    'quick review questions':   '## Quick Review Questions',
+    'quick review questions': '## Quick Review Questions',
   };
   const headingKeys = Object.keys(map).sort((a, b) => b.length - a.length);
+
+  // Promote plain inline section labels to real markdown headings.
+  for (const key of headingKeys) {
+    const k = escRe(key);
+    const heading = map[key];
+    raw = raw.replace(
+      new RegExp(`(^|[\\n.!?])\\s*${k}\\s*[:\\-]?\\s*`, 'gi'),
+      `$1\n\n${heading}\n`
+    );
+  }
 
   // Handle compact model outputs where heading and body are glued together.
   for (const key of headingKeys) {
     const k = escRe(key);
     raw = raw.replace(new RegExp(`(${k})(?=[A-Za-z0-9])`, 'gi'), '$1\n');
-    raw = raw.replace(
-      new RegExp(`(#{1,6}\\s*${k})\\s*[-_]+\\s*`, 'gi'),
-      '$1\n- '
-    );
+    raw = raw.replace(new RegExp(`(#{1,6}\\s*${k})\\s*[-_]+\\s*`, 'gi'), '$1\n- ');
   }
 
   const lines = [];
@@ -57,7 +65,7 @@ export function normalizeMarkdown(text) {
       if (!normalizedKey.startsWith(key)) continue;
       const heading = map[key];
       const lineNoHashes = trimmed.replace(/^#{1,6}\s*/, '').replace(/^\d+\s+/, '').trim();
-      const rest = lineNoHashes.replace(new RegExp(`^${escRe(key)}\\s*[:：-]?\\s*`, 'i'), '').trim();
+      const rest = lineNoHashes.replace(new RegExp(`^${escRe(key)}\\s*[:\\-]?\\s*`, 'i'), '').trim();
       lines.push(heading);
       if (rest) lines.push(rest);
       splitDone = true;
@@ -132,10 +140,10 @@ export function normalizeMarkdown(text) {
 export function renderMarkdownToHtml(md) {
   let h = esc(md).replace(/\*\*/g, '');
   h = h.replace(/^### (.*)$/gm, '<h3>$1</h3>');
-  h = h.replace(/^## (.*)$/gm,  '<h2>$1</h2>');
-  h = h.replace(/^# (.*)$/gm,   '<h1>$1</h1>');
+  h = h.replace(/^## (.*)$/gm, '<h2>$1</h2>');
+  h = h.replace(/^# (.*)$/gm, '<h1>$1</h1>');
   h = h.replace(/^\d+\. (.*)$/gm, '<li>$1</li>');
-  h = h.replace(/^- (.*)$/gm,   '<li>$1</li>');
+  h = h.replace(/^- (.*)$/gm, '<li>$1</li>');
   // Wrap consecutive <li> in <ul>
   h = h.replace(/(<li>[\s\S]*?<\/li>)/g, (block) => {
     const items = block.match(/<li>.*?<\/li>/g) || [];
