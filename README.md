@@ -28,6 +28,28 @@ It chunks documents, embeds and stores chunks in Pinecone, and generates structu
 
 ## Quick Start
 
+### 0) Install prerequisites (Python + Node.js)
+
+You need both:
+
+- Python 3.10+
+- Node.js 20+ (includes `npm`)
+
+Check first:
+
+```bash
+python --version
+node --version
+npm --version
+```
+
+If `npm`/`node` is missing, install Node.js from https://nodejs.org/  
+If you use conda, you can also install it in conda (optional):
+
+```bash
+conda install -c conda-forge nodejs=20 -y
+```
+
 ### 1) Prepare environment file
 
 ```bash
@@ -106,9 +128,16 @@ npm run dev
 
 ### `npm` not recognized
 
-Install Node.js, or install `nodejs` in conda:
+Install Node.js (any normal installer works), then reopen terminal and verify:
 
-```powershell
+```bash
+node --version
+npm --version
+```
+
+If you use conda, this is an optional alternative:
+
+```bash
 conda install -c conda-forge nodejs=20 -y
 ```
 
