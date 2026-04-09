@@ -1,4 +1,4 @@
-# Runtime dependencies for backend (fresh environment compatible)
+# Runtime dependencies for backend
 
 # Web API
 flask>=3.0.0
