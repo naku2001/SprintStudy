@@ -12,6 +12,10 @@ function escRe(s) {
 /** Normalize raw markdown from backend into canonical section headings. */
 export function normalizeMarkdown(text) {
   let raw = String(text || '').replace(/\r\n/g, '\n').replace(/\*\*/g, '');
+  // Force inline markdown headings onto new lines, e.g. "...text.## Key Takeaways"
+  raw = raw
+    .replace(/\s*(#{2,3})\s*/g, '\n$1 ')
+    .replace(/\n{3,}/g, '\n\n');
   const map = {
     'one-sentence overview':    '# One-Sentence Overview',
     'key takeaways':            '## Key Takeaways',
