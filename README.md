@@ -102,8 +102,6 @@ pip install -r backend/requirements.txt
 python backend/main.py
 ```
 
-Backend runs on `http://localhost:8000`.
-
 ### 4) Install frontend deps and run frontend (new terminal)
 
 ```bash
