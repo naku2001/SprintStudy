@@ -119,6 +119,12 @@ Frontend runs on `http://localhost:3000`.
 - Backend health: `http://localhost:8000/health`
 - Frontend page opens and can upload files
 
+### 6) Run backend tests (pytest)
+
+```bash
+pytest -q
+```
+
 ## Quick Start (Conda, Optional)
 
 ```bash

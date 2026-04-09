@@ -1,3 +1,5 @@
+# Description: Pinecone data access layer for vectors, metadata, and saved summaries.
+
 from __future__ import annotations
 
 import json
@@ -23,6 +25,7 @@ class PineconeStore:
     """Single data gateway for vectors + metadata in Pinecone."""
 
     def __init__(self) -> None:
+        """Create Pinecone client, ensure index exists, and bind namespace."""
         if not settings.PINECONE_API_KEY:
             raise ValueError("Missing PINECONE_API_KEY in environment.")
 
@@ -33,6 +36,7 @@ class PineconeStore:
         self.index = self.client.Index(self.index_name)
 
     def _ensure_index(self) -> None:
+        """Create index when missing, or recreate when configured dimension differs."""
         indexes = self.client.list_indexes()
         if hasattr(indexes, "names"):
             existing = set(indexes.names())
@@ -59,6 +63,7 @@ class PineconeStore:
         )
 
     def upsert_records(self, records: list[PineconeRecord]) -> None:
+        """Upsert chunk records using size-aware batching to avoid API limits."""
         vectors = [
             {
                 "id": record.record_id,
@@ -104,6 +109,7 @@ class PineconeStore:
     def query(
         self, vector: list[float], top_k: int = 5, filter_dict: Optional[dict[str, Any]] = None
     ) -> dict[str, Any]:
+        """Query nearest vectors from configured namespace."""
         return self.index.query(
             vector=vector,
             top_k=top_k,
@@ -113,9 +119,11 @@ class PineconeStore:
         )
 
     def delete_records(self, record_ids: list[str]) -> None:
+        """Delete records by explicit id list."""
         self.index.delete(ids=record_ids, namespace=self.namespace)
 
     def list_record_ids(self, prefix: str = "", page_limit: int = 100) -> list[str]:
+        """List record ids in namespace with optional prefix filter."""
         if page_limit <= 0:
             page_limit = 1
         if page_limit >= 100:
@@ -130,6 +138,7 @@ class PineconeStore:
         return record_ids
 
     def fetch_records(self, record_ids: list[str], batch_size: int = 100) -> dict[str, Any]:
+        """Fetch records in batches and merge SDK responses."""
         if not record_ids:
             return {}
 
@@ -145,6 +154,7 @@ class PineconeStore:
         return merged
 
     def rename_note(self, note_id: str, filename: str) -> int:
+        """Update filename metadata on all records belonging to one note."""
         record_ids = self.list_record_ids(prefix=f"{note_id}:")
         if not record_ids:
             return 0
@@ -160,6 +170,7 @@ class PineconeStore:
         return updated
 
     def upsert_note_summary(self, note_id: str, filename: str, summary_markdown: str) -> None:
+        """Store latest markdown summary as a dedicated per-note record."""
         dim = int(settings.EMBEDDING_DIMENSION)
         # Pinecone dense vectors cannot be all-zero.
         values = [0.0] * dim
@@ -179,6 +190,7 @@ class PineconeStore:
         self.index.upsert(vectors=[record], namespace=self.namespace)
 
     def fetch_note_summary(self, note_id: str) -> Optional[str]:
+        """Load persisted summary markdown for one note if available."""
         response = self.index.fetch(ids=[f"{note_id}:summary"], namespace=self.namespace)
         vectors: dict[str, Any] = {}
         if hasattr(response, "vectors"):
@@ -197,4 +209,5 @@ class PineconeStore:
         return str(text) if text else None
 
     def delete_by_note_id(self, note_id: str) -> None:
+        """Delete all records linked to a note via metadata filter."""
         self.index.delete(filter={"note_id": {"$eq": note_id}}, namespace=self.namespace)

@@ -1,3 +1,6 @@
+# Description: Pydantic response models for study note API payloads.
+# This file is part of the SprintStudy project.
+
 from pydantic import BaseModel, Field
 
 

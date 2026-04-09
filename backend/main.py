@@ -1,3 +1,5 @@
+# Description: Flask API entrypoint for upload, summarize, library, rename, and delete routes.
+
 from __future__ import annotations
 
 import json
@@ -26,19 +28,24 @@ CORS(app)
 
 @app.get("/")
 def index():
+    """Render the single-page frontend shell."""
     return render_template("index.html")
 
 
 @app.get("/health")
 def health():
+    """Health check endpoint."""
     return jsonify({"status": "ok"})
 
 
 def _json_error(message: str, status: int = 400):
+    """Return a JSON error response."""
     return jsonify({"detail": message}), status
 
 
 def _get_upload_or_error():
+    """Read uploaded file from form data."""
+    # Keep upload validation in one place so all upload routes behave consistently.
     uploaded_file = request.files.get("file")
     if uploaded_file is None:
         return None, _json_error("Missing file field in multipart form data.", 400)
@@ -46,6 +53,7 @@ def _get_upload_or_error():
 
 
 def _save_uploaded_file(uploaded_file):
+    """Validate extension/content and persist upload into temp storage."""
     filename = uploaded_file.filename or "uploaded_note"
     suffix = Path(filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
@@ -62,18 +70,23 @@ def _save_uploaded_file(uploaded_file):
 
 
 def _get_embedding_overrides() -> tuple[str | None, str | None]:
+    """Read optional embedding settings from request form."""
     provider = (request.form.get("embedding_provider") or "").strip().lower() or None
     model = (request.form.get("embedding_model") or "").strip() or None
     return provider, model
 
 
 def _get_generation_overrides() -> tuple[str | None, str | None]:
+    """Read optional generation settings from request form."""
     provider = (request.form.get("generation_provider") or "").strip().lower() or None
     model = (request.form.get("generation_model") or "").strip() or None
     return provider, model
 
 
 def _resolve_unique_filename(original_filename: str) -> str:
+    """Resolve filename collisions by appending numeric suffixes like '(1)'."""
+    # Deduplicate by checking existing note filenames in Pinecone metadata.
+    # If a collision exists, append (1), (2), ... before suffix.
     if not settings.PINECONE_API_KEY:
         return original_filename
     try:
@@ -115,6 +128,7 @@ def _resolve_unique_filename(original_filename: str) -> str:
 
 @app.post("/api/study-notes/summarize")
 def summarize_study_note():
+    """Handle non-streaming summarize request and return final JSON payload."""
     uploaded_file, err = _get_upload_or_error()
     if err:
         return err
@@ -148,11 +162,15 @@ def summarize_study_note():
 
 
 def _sse(event: str, data: dict[str, Any]) -> str:
+    """Encode a single SSE frame."""
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 class _StreamMarkdownCleaner:
+    """Normalize streamed markdown fragments into readable incremental text."""
+
     def __init__(self) -> None:
+        """Initialize state for cross-chunk carry handling."""
         self._carry = ""
         self._heading_terms = [
             "One-Sentence Overview",
@@ -165,6 +183,7 @@ class _StreamMarkdownCleaner:
         ]
 
     def clean(self, text: str) -> str:
+        """Clean a stream token while preserving markdown section boundaries."""
         if not text:
             return ""
         combined = self._carry + text
@@ -193,12 +212,14 @@ class _StreamMarkdownCleaner:
         return cleaned
 
     def flush(self) -> str:
+        """Flush trailing buffered fragment at stream end."""
         tail = self._carry
         self._carry = ""
         return tail.replace("**", "")
 
 
 def _emit_summary_stream(summary_iter, cleaner: _StreamMarkdownCleaner):
+    """Forward summarize iterator as SSE and aggregate emitted final text."""
     buffer: list[str] = []
     for item in summary_iter:
         msg_type = item.get("type")
@@ -220,6 +241,7 @@ def _emit_summary_stream(summary_iter, cleaner: _StreamMarkdownCleaner):
 
 @app.post("/api/study-notes/summarize-stream")
 def summarize_study_note_stream():
+    """Stream summarize progress + tokens over Server-Sent Events."""
     uploaded_file, err = _get_upload_or_error()
     if err:
         return err
@@ -232,6 +254,7 @@ def summarize_study_note_stream():
 
     @stream_with_context
     def event_stream():
+        """Run summarize pipeline and yield SSE status/token events."""
         try:
             cleaner = _StreamMarkdownCleaner()
             service = StudyNoteSummarizer(
@@ -285,6 +308,7 @@ def summarize_study_note_stream():
 
 
 def _chunk_index(record_id: str) -> int:
+    """Parse trailing numeric chunk index from a record id."""
     if ":" not in record_id:
         return -1
     idx_str = record_id.rsplit(":", 1)[1]
@@ -292,12 +316,14 @@ def _chunk_index(record_id: str) -> int:
 
 
 def _is_chunk_record_id(record_id: str) -> bool:
+    """Return whether a record id ends with a numeric chunk index."""
     if ":" not in record_id:
         return False
     return record_id.rsplit(":", 1)[1].isdigit()
 
 
 def _normalize_vector_record(record_id: str, record_obj: Any) -> dict[str, Any]:
+    """Normalize SDK/object/dict record shapes into one dictionary schema."""
     metadata = getattr(record_obj, "metadata", None)
     values = getattr(record_obj, "values", None)
 
@@ -315,6 +341,8 @@ def _normalize_vector_record(record_id: str, record_obj: Any) -> dict[str, Any]:
 
 
 def _load_note_records(store: PineconeStore, note_id: str) -> tuple[list[str], dict[str, Any]]:
+    """Load and sort all chunk records for a note."""
+    # Note records are stored as <note_id>:<chunk_index>; keep numeric chunk ids only.
     record_ids = store.list_record_ids(prefix=f"{note_id}:")
     record_ids = [rid for rid in record_ids if _is_chunk_record_id(rid)]
     record_ids.sort(key=_chunk_index)
@@ -323,6 +351,8 @@ def _load_note_records(store: PineconeStore, note_id: str) -> tuple[list[str], d
 
 
 def _load_note_chunks(store: PineconeStore, note_id: str):
+    """Load ordered chunk texts for resummarization flow."""
+    # Assemble normalized chunk text in chunk order for re-summarization.
     record_ids, records = _load_note_records(store, note_id)
     if not record_ids:
         return None, None, None
@@ -345,6 +375,7 @@ def _load_note_chunks(store: PineconeStore, note_id: str):
 
 @app.get("/api/study-notes")
 def list_study_notes():
+    """List note cards with chunk counts and local file status."""
     try:
         store = PineconeStore()
         record_ids = store.list_record_ids()
@@ -399,6 +430,7 @@ def list_study_notes():
 
 @app.get("/api/study-notes/<note_id>")
 def get_study_note_detail(note_id: str):
+    """Return note detail including chunks and optional stored summary."""
     include_full_values = request.args.get("include_full_values", "false").lower() == "true"
     try:
         store = PineconeStore()
@@ -454,6 +486,7 @@ def get_study_note_detail(note_id: str):
 
 @app.post("/api/study-notes/<note_id>/resummarize")
 def resummarize_study_note(note_id: str):
+    """Run non-streaming summarize on already stored chunks."""
     try:
         store = PineconeStore()
         record_ids, filename, chunk_texts = _load_note_chunks(store, note_id)
@@ -481,8 +514,10 @@ def resummarize_study_note(note_id: str):
 
 @app.post("/api/study-notes/<note_id>/resummarize-stream")
 def resummarize_study_note_stream(note_id: str):
+    """Run streaming summarize on already stored chunks."""
     @stream_with_context
     def event_stream():
+        """Yield re-summarize status/token events for a specific note."""
         try:
             cleaner = _StreamMarkdownCleaner()
             store = PineconeStore()
@@ -522,6 +557,7 @@ def resummarize_study_note_stream(note_id: str):
 
 @app.patch("/api/study-notes/<note_id>")
 def rename_study_note(note_id: str):
+    """Rename a note by updating filename metadata for all its records."""
     payload = request.get_json(silent=True) or {}
     new_filename = str(payload.get("filename", "")).strip()
     if not new_filename:
@@ -541,6 +577,7 @@ def rename_study_note(note_id: str):
 
 @app.delete("/api/study-notes/<note_id>")
 def delete_study_note(note_id: str):
+    """Delete a note from Pinecone and remove linked local upload file."""
     try:
         store = PineconeStore()
         record_ids, _ = _load_note_records(store, note_id)

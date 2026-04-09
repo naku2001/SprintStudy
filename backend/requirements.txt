@@ -18,3 +18,6 @@ pinecone>=7.0.0
 # Document parsing + numeric ops
 pymupdf>=1.24.0
 numpy>=1.26.0
+
+# Testing
+pytest>=8.0.0

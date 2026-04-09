@@ -1,3 +1,6 @@
+# Description: Core extraction, embedding, and summarization pipeline for study notes.
+# This file is part of the SprintStudy project.
+
 from __future__ import annotations
 
 import json
@@ -22,12 +25,11 @@ from backend.services.pinecone_store import PineconeRecord, PineconeStore
 EMBED_MODEL = "models/gemini-embedding-001"
 GEN_MODEL = "models/gemini-2.5-flash"
 MARKDOWN_RULES = (
-    "Rules:\n"
-    "- Do not invent facts.\n"
-    "- Stay faithful to the provided note.\n"
-    "- Use Markdown headings with # and ## exactly as requested.\n"
-    "- Do not use bold markers like ** anywhere in output.\n"
-    "- Do not add any preface before the first heading.\n\n"
+    "Please follow these output rules:\n"
+    "- Use only information from the provided note.\n"
+    "- Keep heading levels exactly as requested (# / ##).\n"
+    "- Do not output bold markers like **.\n"
+    "- Start directly from the first heading.\n\n"
 )
 
 BULLET_RE = re.compile(
@@ -53,6 +55,7 @@ class StudyNoteSummarizer:
         generation_provider: Optional[str] = None,
         generation_model: Optional[str] = None,
     ) -> None:
+        """Initialize provider/model choices for embedding and generation."""
         self.client: Optional[genai.Client] = None
         self.embedding_provider = (embedding_provider or settings.EMBEDDING_PROVIDER).lower()
         self.embedding_model = embedding_model or settings.EMBEDDING_MODEL or EMBED_MODEL
@@ -60,6 +63,7 @@ class StudyNoteSummarizer:
         self.generation_model = generation_model or settings.GENERATION_MODEL or ""
 
     def _get_gemini_client(self) -> genai.Client:
+        """Create or reuse a Gemini API client."""
         if not settings.GEMINI_API_KEY:
             raise ValueError("Missing GEMINI_API_KEY in environment.")
         if self.client is None:
@@ -67,6 +71,7 @@ class StudyNoteSummarizer:
         return self.client
 
     def summarize_and_store(self, file_path: Path, filename: str) -> dict[str, Any]:
+        """Run full pipeline: extract, embed, store, and summarize."""
         chunks = self.extract_chunks(file_path)
         if not chunks:
             raise ValueError("No usable text extracted from the uploaded file.")
@@ -102,6 +107,7 @@ class StudyNoteSummarizer:
         chunks: list[str],
         vectors: np.ndarray,
     ) -> bool:
+        """Persist embedded chunks and metadata into Pinecone."""
         return self._store_in_pinecone(
             note_id=note_id,
             filename=filename,
@@ -113,6 +119,7 @@ class StudyNoteSummarizer:
     def extract_chunks(
         self, file_path: Path, max_chars: Optional[int] = None, overlap: Optional[int] = None
     ) -> list[str]:
+        """Extract semantic text blocks and pack them into chunk windows."""
         max_chars = int(max_chars or settings.CHUNK_MAX_CHARS)
         overlap = int(overlap or settings.CHUNK_OVERLAP)
         max_chars = max(400, max_chars)
@@ -129,6 +136,7 @@ class StudyNoteSummarizer:
         return self._pack_blocks(blocks, max_chars=max_chars, overlap=overlap)
 
     def embed_chunks(self, chunks: list[str]) -> np.ndarray:
+        """Dispatch embedding to configured provider and validate output."""
         if not chunks:
             return np.zeros((0, settings.EMBEDDING_DIMENSION), dtype=np.float32)
 
@@ -143,6 +151,7 @@ class StudyNoteSummarizer:
         return self._embed_chunks_gemini(chunks)
 
     def _embed_chunks_gemini(self, chunks: list[str]) -> np.ndarray:
+        """Embed chunks with Gemini batch endpoint."""
         embed_model = self.embedding_model or EMBED_MODEL
         max_batch = max(1, min(100, int(settings.GEMINI_EMBED_MAX_BATCH)))
 
@@ -168,6 +177,7 @@ class StudyNoteSummarizer:
         return vectors
 
     def _embed_chunks_huggingface(self, chunks: list[str]) -> np.ndarray:
+        """Embed chunks with HuggingFace inference endpoints."""
         model_id = self.embedding_model or "BAAI/bge-small-zh"
         if not settings.HUGGINGFACE_API_KEY:
             raise ValueError(
@@ -204,6 +214,7 @@ class StudyNoteSummarizer:
         headers: dict[str, str],
         body: dict[str, Any],
     ) -> Any:
+        """Try multiple HF endpoint variants and return first successful response."""
         last_error: Optional[Exception] = None
         for url in candidate_urls:
             try:
@@ -222,6 +233,7 @@ class StudyNoteSummarizer:
         candidate_urls: list[str],
         headers: dict[str, str],
     ) -> Any:
+        """Retry one chunk with progressive truncation for sequence-length issues."""
         # Some HF-hosted encoder models (including bge-small-zh) can error on
         # long sequences unless we force truncation; if needed, progressively
         # shorten the text and retry.
@@ -271,6 +283,7 @@ class StudyNoteSummarizer:
         max_attempts: int = 6,
         base_sleep: float = 1.0,
     ) -> Any:
+        """Call HF endpoint with exponential backoff for transient failures."""
         last_error: Optional[Exception] = None
         for attempt in range(1, max_attempts + 1):
             try:
@@ -302,6 +315,7 @@ class StudyNoteSummarizer:
 
     @staticmethod
     def _to_sentence_vector(payload: Any) -> np.ndarray:
+        """Normalize various embedding payload shapes into one sentence vector."""
         if not isinstance(payload, list) or not payload:
             raise ValueError("Invalid embedding payload returned by API.")
 
@@ -322,6 +336,7 @@ class StudyNoteSummarizer:
 
     @staticmethod
     def _validate_embedding_dimensions(vectors: np.ndarray) -> None:
+        """Ensure embedding matrix shape matches configured vector dimension."""
         if vectors.size == 0:
             return
         if vectors.ndim != 2:
@@ -336,6 +351,7 @@ class StudyNoteSummarizer:
             )
 
     def summarize_adaptive(self, chunks: list[str]) -> str:
+        """Choose single-pass or map-reduce summarization based on chunk size."""
         chunk_count = len(chunks)
         if self._should_use_single_pass(chunks):
             return self._clean_markdown_text(self._summarize_once(chunks))
@@ -352,6 +368,7 @@ class StudyNoteSummarizer:
         chunks: list[str],
         vectors: np.ndarray,
     ) -> bool:
+        """Convert chunk vectors to record objects and upsert them."""
         if not settings.PINECONE_API_KEY:
             return False
 
@@ -382,10 +399,12 @@ class StudyNoteSummarizer:
         return True
 
     def _summarize_once(self, chunks: list[str]) -> str:
+        """Summarize all chunks in one generation call."""
         prompt = self._build_single_pass_markdown_prompt(chunks)
         return self._generate_with_retry(prompt, temperature=0.2)
 
     def _build_summary_batches(self, chunks: list[str]) -> list[list[str]]:
+        """Build chunk batches constrained by target count, chars, and hard limits."""
         target_batches = max(1, int(settings.SUMMARY_BATCH_TARGET_COUNT))
         max_batch_chunks = max(1, int(settings.SUMMARY_BATCH_MAX_CHUNKS))
         max_batch_chars = max(1200, int(settings.SUMMARY_BATCH_MAX_CHARS))
@@ -414,6 +433,7 @@ class StudyNoteSummarizer:
 
     @staticmethod
     def _cap_batches_to_limit(batches: list[list[str]], max_batches: int) -> list[list[str]]:
+        """Merge adjacent batches until total batch count is under configured cap."""
         if len(batches) <= max_batches:
             return batches
 
@@ -429,12 +449,14 @@ class StudyNoteSummarizer:
         return merged[:max_batches]
 
     def _should_use_single_pass(self, chunks: list[str]) -> bool:
+        """Return whether note size is small enough for one-pass summarization."""
         if len(chunks) <= settings.SUMMARY_SINGLE_PASS_MAX_CHUNKS:
             return True
         total_chars = sum(len(c) for c in chunks)
         return total_chars <= max(2000, int(settings.SUMMARY_SINGLE_PASS_MAX_INPUT_CHARS))
 
     def _batch_summarize_chunks(self, batches: list[list[str]]) -> list[str]:
+        """Create intermediate summaries for each chunk batch."""
         summaries: list[str] = []
         sleep_seconds = max(0.0, settings.SUMMARY_BATCH_SLEEP_MS / 1000.0)
         total_batches = len(batches)
@@ -442,10 +464,9 @@ class StudyNoteSummarizer:
         for i, batch in enumerate(batches, start=1):
             joined = "\n\n".join([f"[CHUNK {chunk_start + j}]\n{c}" for j, c in enumerate(batch)])
             prompt = (
-                "You are summarizing a batch of study-note excerpts.\n"
-                "For each chunk, return 3-7 bullets with key concepts, definitions, and critical details.\n"
-                "Include equations/numbers/dates if they exist.\n"
-                "Do not invent missing information.\n\n"
+                "Summarize this batch of study-note excerpts.\n"
+                "Return 3-7 bullets per chunk with key concepts, definitions, and important details.\n"
+                "Include equations, numbers, and dates when present.\n\n"
                 f"EXCERPTS:\n{joined}"
             )
             summaries.append(self._generate_with_retry(prompt, temperature=0.2))
@@ -455,10 +476,12 @@ class StudyNoteSummarizer:
         return summaries
 
     def _summarize_all(self, batch_summaries: list[str]) -> str:
+        """Reduce intermediate batch summaries into final markdown."""
         prompt = self._build_final_markdown_prompt(batch_summaries)
         return self._generate_with_retry(prompt, temperature=0.2)
 
     def summarize_adaptive_stream(self, chunks: list[str]):
+        """Streaming variant of adaptive summarize with progress statuses."""
         chunk_count = len(chunks)
         if self._should_use_single_pass(chunks):
             yield {"type": "status", "message": "Small note detected. Streaming single-pass summary..."}
@@ -487,10 +510,9 @@ class StudyNoteSummarizer:
             }
             joined = "\n\n".join([f"[CHUNK {chunk_start + j}]\n{c}" for j, c in enumerate(batch)])
             prompt = (
-                "You are summarizing a batch of study-note excerpts.\n"
-                "For each chunk, return 3-7 bullets with key concepts, definitions, and critical details.\n"
-                "Include equations/numbers/dates if they exist.\n"
-                "Do not invent missing information.\n\n"
+                "Summarize this batch of study-note excerpts.\n"
+                "Return 3-7 bullets per chunk with key concepts, definitions, and important details.\n"
+                "Include equations, numbers, and dates when present.\n\n"
                 f"EXCERPTS:\n{joined}"
             )
             batch_summaries.append(self._generate_with_retry(prompt, temperature=0.2))
@@ -505,9 +527,9 @@ class StudyNoteSummarizer:
         yield {"type": "done"}
 
     def _build_single_pass_markdown_prompt(self, chunks: list[str]) -> str:
+        """Construct strict markdown prompt for one-pass summarization."""
         joined = "\n\n".join([f"[CHUNK {i + 1}]\n{c}" for i, c in enumerate(chunks)])
         return (
-            "You are a careful study-note summarization assistant.\n"
             "Write a concise final summary in English using clean Markdown.\n\n"
             "Output format (Markdown):\n"
             "# One-Sentence Overview\n"
@@ -525,10 +547,11 @@ class StudyNoteSummarizer:
         )
 
     def _build_final_markdown_prompt(self, batch_summaries: list[str]) -> str:
+        """Construct reduce-stage markdown prompt from batch outputs."""
         combined = "\n\n".join(batch_summaries)
         return (
-            "You will receive batch summaries generated from one study note.\n"
-            "Write a final student-friendly summary in English using clean Markdown.\n\n"
+            "You will receive batch summaries from one study note.\n"
+            "Write a final summary in English using clean Markdown.\n\n"
             "Output format (Markdown):\n"
             "# One-Sentence Overview\n"
             "A single sentence.\n\n"
@@ -545,6 +568,7 @@ class StudyNoteSummarizer:
         )
 
     def _generate_stream(self, prompt: str, temperature: float = 0.2):
+        """Stream generation tokens from selected provider."""
         if self.generation_provider == "together":
             yield from self._generate_stream_together(prompt, temperature=temperature)
             return
@@ -561,6 +585,7 @@ class StudyNoteSummarizer:
 
     @staticmethod
     def _clean_markdown_text(text: str) -> str:
+        """Normalize heading variants and remove duplicated section headers."""
         out = (text or "").replace("\r\n", "\n")
         out = out.replace("**", "")
         lines = out.split("\n")
@@ -609,6 +634,7 @@ class StudyNoteSummarizer:
         base_sleep: float = 1.0,
         max_sleep: float = 20.0,
     ) -> str:
+        """Generate final text with retry/backoff on transient failures."""
         last_error: Optional[Exception] = None
         for attempt in range(1, max_attempts + 1):
             try:
@@ -636,14 +662,17 @@ class StudyNoteSummarizer:
         raise RuntimeError(f"Generation failed after retries. Last error: {last_error}")
 
     def _resolved_generation_model(self) -> str:
+        """Resolve provider-specific model id from overrides/config defaults."""
         if self.generation_provider == "together":
             return self.generation_model or settings.TOGETHER_MODEL
         return self.generation_model or settings.GEMINI_MODEL or GEN_MODEL
 
     def current_generation_model(self) -> str:
+        """Expose currently resolved generation model for API metadata."""
         return self._resolved_generation_model()
 
     def _generate_with_together(self, prompt: str, temperature: float = 0.2) -> str:
+        """Run non-streaming chat completion against Together-compatible API."""
         if not settings.TOGETHER_API_KEY:
             raise ValueError("Missing TOGETHER_API_KEY in environment.")
         url = settings.TOGETHER_BASE_URL.rstrip("/") + "/chat/completions"
@@ -675,6 +704,7 @@ class StudyNoteSummarizer:
         return text
 
     def _generate_stream_together(self, prompt: str, temperature: float = 0.2):
+        """Stream tokens from Together SSE-compatible chat endpoint."""
         if not settings.TOGETHER_API_KEY:
             raise ValueError("Missing TOGETHER_API_KEY in environment.")
         url = settings.TOGETHER_BASE_URL.rstrip("/") + "/chat/completions"
@@ -721,6 +751,7 @@ class StudyNoteSummarizer:
 
     @staticmethod
     def _together_content_to_text(content: Any) -> str:
+        """Flatten Together content payload (string or typed list) into plain text."""
         if isinstance(content, str):
             return content
         if isinstance(content, list):
@@ -738,6 +769,7 @@ class StudyNoteSummarizer:
 
     @staticmethod
     def _is_transient_error(err: Exception) -> bool:
+        """Heuristically classify whether an exception looks retriable."""
         msg = str(err).upper()
         transient_keys = [
             "503",
@@ -752,9 +784,11 @@ class StudyNoteSummarizer:
 
     @staticmethod
     def _clean_text(text: str) -> str:
+        """Normalize whitespace and strip null chars in extracted text."""
         return re.sub(r"\s+", " ", text.replace("\x00", " ")).strip()
 
     def _extract_lines_from_page(self, page: fitz.Page) -> list[LineInfo]:
+        """Extract ordered line-level text + visual cues from one PDF page."""
         data = page.get_text("dict")
         lines: list[LineInfo] = []
 
@@ -796,6 +830,7 @@ class StudyNoteSummarizer:
         return lines
 
     def _extract_smart_blocks_from_pdf(self, pdf_path: Path) -> list[str]:
+        """Extract paragraph-like blocks by grouping nearby visual lines."""
         doc = fitz.open(str(pdf_path))
         all_blocks: list[str] = []
 
@@ -817,6 +852,7 @@ class StudyNoteSummarizer:
     def _group_lines_by_vertical_gaps(
         lines: list[LineInfo], gap_threshold: float
     ) -> list[list[LineInfo]]:
+        """Group neighboring lines into blocks using vertical spacing."""
         if not lines:
             return []
 
@@ -836,6 +872,7 @@ class StudyNoteSummarizer:
 
     @staticmethod
     def _merge_bullets_within_group(group: list[LineInfo]) -> list[str]:
+        """Merge likely multi-line bullet fragments inside one visual group."""
         blocks: list[str] = []
         index = 0
 
@@ -860,6 +897,7 @@ class StudyNoteSummarizer:
 
     @staticmethod
     def _merge_title_with_next(chunks: list[str]) -> list[str]:
+        """Join short standalone titles with their following block."""
         merged: list[str] = []
         idx = 0
         while idx < len(chunks):
@@ -876,6 +914,7 @@ class StudyNoteSummarizer:
 
     @staticmethod
     def _paragraph_blocks(text: str) -> list[str]:
+        """Split text into paragraph blocks, with compact fallback."""
         normalized = text.replace("\r\n", "\n")
         blocks = [p.strip() for p in re.split(r"\n\s*\n", normalized) if p.strip()]
         if blocks:
@@ -885,10 +924,12 @@ class StudyNoteSummarizer:
 
     @staticmethod
     def _pack_blocks(blocks: list[str], max_chars: int, overlap: int) -> list[str]:
+        """Pack blocks into bounded chunks and split oversized blocks safely."""
         packed: list[str] = []
         current = ""
 
         def flush() -> None:
+            """Append current buffer to packed output if non-empty."""
             nonlocal current
             if current.strip():
                 packed.append(current.strip())
@@ -921,6 +962,7 @@ class StudyNoteSummarizer:
 
     @staticmethod
     def export_debug_chunks(chunks: list[str], output_path: Path) -> None:
+        """Write chunks as JSONL for extraction/debug inspection."""
         with output_path.open("w", encoding="utf-8") as fp:
             for i, chunk in enumerate(chunks):
                 obj = {"chunk_id": i, "text": chunk}

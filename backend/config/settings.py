@@ -1,3 +1,6 @@
+# Description: Centralized environment-based runtime settings used by backend services.
+# This file is part of the SprintStudy project.
+
 import os
 from pathlib import Path
 
