@@ -44,7 +44,7 @@ export default function Nav({ currentPage, onNavigate }) {
             className="w-[5px] h-[5px] rounded-full flex-shrink-0"
             style={{ background: '#c0392b', animation: 'pulse 2s ease-in-out infinite' }}
           />
-          Gemini 2.5 Flash
+          Model Selectable
         </div>
       </div>
     </nav>

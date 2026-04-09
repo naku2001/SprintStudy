@@ -14,23 +14,72 @@ export function normalizeMarkdown(text) {
     'topic flow':               '## Topic Flow',
     'important details':        '## Important Details',
     'risks or limitations':     '## Risks or Limitations',
-    '3 quick review questions': '## 3 Quick Review Questions',
+    '3 quick review questions': '## Quick Review Questions',
+    'quick review questions':   '## Quick Review Questions',
   };
 
   const lines = raw.split('\n').map((l) => {
-    const k = l.trim().replace(/:$/, '').toLowerCase();
-    return map[k] || l;
+    const trimmed = l.trim();
+    const k = trimmed.replace(/:$/, '').toLowerCase();
+    const normalizedKey = k
+      .replace(/^#{1,6}\s*/, '')
+      .replace(/^\d+\s+/, '')
+      .trim();
+    const mapped = map[k] || map[normalizedKey];
+    if (mapped) return mapped;
+    // Normalize heading forms like "## 3 Quick Review Questions"
+    if (/^#{1,6}\s*3 quick review questions:?$/i.test(trimmed)) {
+      return '## Quick Review Questions';
+    }
+    return l;
   });
 
+  // Drop dangling heading markers produced by streamed partial tokens.
+  const cleanedLines = lines.filter((l) => !/^#{1,6}\s*$/.test(l.trim()));
+
   // Remove duplicate consecutive non-empty lines
-  const ne = lines.reduce((a, l, i) => (l.trim() ? [...a, i] : a), []);
+  const ne = cleanedLines.reduce((a, l, i) => (l.trim() ? [...a, i] : a), []);
   if (ne.length >= 2) {
-    const a = lines[ne[0]].trim().replace(/^#+\s*/, '').replace(/:$/, '').toLowerCase();
-    const b = lines[ne[1]].trim().replace(/^#+\s*/, '').replace(/:$/, '').toLowerCase();
-    if (a === b) lines[ne[1]] = '';
+    const a = cleanedLines[ne[0]].trim().replace(/^#+\s*/, '').replace(/:$/, '').toLowerCase();
+    const b = cleanedLines[ne[1]].trim().replace(/^#+\s*/, '').replace(/:$/, '').toLowerCase();
+    if (a === b) cleanedLines[ne[1]] = '';
   }
 
-  const out = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  // Remove "Risks or Limitations" section when it carries no real content.
+  const sections = [];
+  let current = { heading: '', lines: [] };
+  for (const line of cleanedLines) {
+    if (/^##\s+/.test(line.trim())) {
+      sections.push(current);
+      current = { heading: line.trim(), lines: [] };
+    } else {
+      current.lines.push(line);
+    }
+  }
+  sections.push(current);
+
+  const shouldDropRisks = (heading, lines) => {
+    if (heading.toLowerCase() !== '## risks or limitations') return false;
+    const content = lines.map((l) => l.trim()).filter(Boolean).join(' ').toLowerCase();
+    if (!content) return true;
+    return (
+      content.includes('no explicit risks or limitations') ||
+      content.includes('no specific risks or limitations') ||
+      content.includes('not explicitly mentioned') ||
+      content.includes('not mentioned') ||
+      content === 'none' ||
+      content === 'n/a'
+    );
+  };
+
+  const rebuilt = [];
+  for (const sec of sections) {
+    if (shouldDropRisks(sec.heading, sec.lines)) continue;
+    if (sec.heading) rebuilt.push(sec.heading);
+    rebuilt.push(...sec.lines);
+  }
+
+  const out = rebuilt.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   const first = (out.split('\n').find((l) => l.trim()) || '')
     .trim().replace(/:$/, '').toLowerCase().replace(/^#+\s*/, '');
 

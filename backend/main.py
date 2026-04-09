@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,18 @@ def _save_uploaded_file(uploaded_file):
     return filename, save_path, None
 
 
+def _get_embedding_overrides() -> tuple[str | None, str | None]:
+    provider = (request.form.get("embedding_provider") or "").strip().lower() or None
+    model = (request.form.get("embedding_model") or "").strip() or None
+    return provider, model
+
+
+def _get_generation_overrides() -> tuple[str | None, str | None]:
+    provider = (request.form.get("generation_provider") or "").strip().lower() or None
+    model = (request.form.get("generation_model") or "").strip() or None
+    return provider, model
+
+
 @app.post("/api/study-notes/summarize")
 def summarize_study_note():
     uploaded_file, err = _get_upload_or_error()
@@ -69,10 +82,23 @@ def summarize_study_note():
     filename, save_path, err = _save_uploaded_file(uploaded_file)
     if err:
         return err
+    embedding_provider, embedding_model = _get_embedding_overrides()
+    generation_provider, generation_model = _get_generation_overrides()
 
     try:
-        service = StudyNoteSummarizer()
+        service = StudyNoteSummarizer(
+            embedding_provider=embedding_provider,
+            embedding_model=embedding_model,
+            generation_provider=generation_provider,
+            generation_model=generation_model,
+        )
         result = service.summarize_and_store(file_path=save_path, filename=filename)
+        if result.get("stored_to_pinecone") and result.get("summary"):
+            PineconeStore().upsert_note_summary(
+                note_id=str(result.get("note_id", "")),
+                filename=str(result.get("filename", filename)),
+                summary_markdown=str(result.get("summary", "")),
+            )
         return jsonify(result)
     except ValueError as exc:
         return _json_error(str(exc), 400)
@@ -96,7 +122,12 @@ class _StreamMarkdownCleaner:
         if combined.endswith("*"):
             self._carry = "*"
             combined = combined[:-1]
-        return combined.replace("**", "")
+        cleaned = combined.replace("**", "")
+        # Keep headings/bullets readable when models stream compact text.
+        cleaned = re.sub(r"(?<!\n)(##\s)", r"\n## ", cleaned)
+        cleaned = re.sub(r"(?<!\n)(#\s)", r"\n# ", cleaned)
+        cleaned = re.sub(r"(## [^\n]+?)\s*-\s", r"\1\n- ", cleaned)
+        return cleaned
 
     def flush(self) -> str:
         tail = self._carry
@@ -105,19 +136,23 @@ class _StreamMarkdownCleaner:
 
 
 def _emit_summary_stream(summary_iter, cleaner: _StreamMarkdownCleaner):
+    buffer: list[str] = []
     for item in summary_iter:
         msg_type = item.get("type")
         if msg_type == "token":
             clean_text = cleaner.clean(item.get("text", ""))
             if clean_text:
+                buffer.append(clean_text)
                 yield _sse("token", {"text": clean_text})
         elif msg_type == "status":
             yield _sse("status", {"message": item.get("message", "")})
         elif msg_type == "done":
             tail = cleaner.flush()
             if tail:
+                buffer.append(tail)
                 yield _sse("token", {"text": tail})
             yield _sse("done", {"ok": True})
+    return "".join(buffer).strip()
 
 
 @app.post("/api/study-notes/summarize-stream")
@@ -128,12 +163,19 @@ def summarize_study_note_stream():
     filename, save_path, err = _save_uploaded_file(uploaded_file)
     if err:
         return err
+    embedding_provider, embedding_model = _get_embedding_overrides()
+    generation_provider, generation_model = _get_generation_overrides()
 
     @stream_with_context
     def event_stream():
         try:
             cleaner = _StreamMarkdownCleaner()
-            service = StudyNoteSummarizer()
+            service = StudyNoteSummarizer(
+                embedding_provider=embedding_provider,
+                embedding_model=embedding_model,
+                generation_provider=generation_provider,
+                generation_model=generation_model,
+            )
             yield _sse("status", {"message": "Extracting chunks..."})
             chunks = service.extract_chunks(save_path)
             if not chunks:
@@ -157,9 +199,21 @@ def summarize_study_note_stream():
                     "filename": filename,
                     "chunks": len(chunks),
                     "stored_to_pinecone": stored,
+                    "embedding_provider": service.embedding_provider,
+                    "embedding_model": service.embedding_model,
+                    "generation_provider": service.generation_provider,
+                    "generation_model": service.current_generation_model(),
                 },
             )
-            yield from _emit_summary_stream(service.summarize_adaptive_stream(chunks), cleaner)
+            summary_text = yield from _emit_summary_stream(
+                service.summarize_adaptive_stream(chunks), cleaner
+            )
+            if stored and summary_text:
+                PineconeStore().upsert_note_summary(
+                    note_id=note_id,
+                    filename=filename,
+                    summary_markdown=summary_text,
+                )
         except Exception as exc:  # noqa: BLE001
             yield _sse("error", {"detail": f"Failed to summarize note: {exc}"})
 
@@ -171,6 +225,12 @@ def _chunk_index(record_id: str) -> int:
         return -1
     idx_str = record_id.rsplit(":", 1)[1]
     return int(idx_str) if idx_str.isdigit() else -1
+
+
+def _is_chunk_record_id(record_id: str) -> bool:
+    if ":" not in record_id:
+        return False
+    return record_id.rsplit(":", 1)[1].isdigit()
 
 
 def _normalize_vector_record(record_id: str, record_obj: Any) -> dict[str, Any]:
@@ -192,6 +252,7 @@ def _normalize_vector_record(record_id: str, record_obj: Any) -> dict[str, Any]:
 
 def _load_note_records(store: PineconeStore, note_id: str) -> tuple[list[str], dict[str, Any]]:
     record_ids = store.list_record_ids(prefix=f"{note_id}:")
+    record_ids = [rid for rid in record_ids if _is_chunk_record_id(rid)]
     record_ids.sort(key=_chunk_index)
     records = store.fetch_records(record_ids)
     return record_ids, records
@@ -228,8 +289,13 @@ def list_study_notes():
 
         groups: dict[str, list[str]] = {}
         for record_id in record_ids:
+            if not _is_chunk_record_id(record_id):
+                continue
             note_id = record_id.split(":", 1)[0]
             groups.setdefault(note_id, []).append(record_id)
+
+        if not groups:
+            return jsonify({"notes": []})
 
         first_ids = []
         for note_id, ids in groups.items():
@@ -275,6 +341,7 @@ def get_study_note_detail(note_id: str):
         record_ids, records = _load_note_records(store, note_id)
         if not record_ids:
             return jsonify({"detail": f"note_id '{note_id}' not found."}), 404
+        stored_summary = store.fetch_note_summary(note_id)
 
         chunks = []
         for record_id in record_ids:
@@ -311,6 +378,7 @@ def get_study_note_detail(note_id: str):
                 "filename": filename,
                 "stored_file": stored_file,
                 "chunk_count": len(chunks),
+                "summary_markdown": stored_summary,
                 "chunks": chunks,
                 "include_full_values": include_full_values,
                 "sample_chunk_index": first_meta.get("chunk_index"),
@@ -333,6 +401,7 @@ def resummarize_study_note(note_id: str):
 
         summarizer = StudyNoteSummarizer()
         summary = summarizer.summarize_adaptive(chunk_texts)
+        store.upsert_note_summary(note_id=note_id, filename=filename, summary_markdown=summary)
         return jsonify(
             {
                 "note_id": note_id,
@@ -372,11 +441,38 @@ def resummarize_study_note_stream(note_id: str):
                 },
             )
             summarizer = StudyNoteSummarizer()
-            yield from _emit_summary_stream(summarizer.summarize_adaptive_stream(chunk_texts), cleaner)
+            summary_text = yield from _emit_summary_stream(
+                summarizer.summarize_adaptive_stream(chunk_texts), cleaner
+            )
+            if summary_text:
+                store.upsert_note_summary(
+                    note_id=note_id,
+                    filename=filename,
+                    summary_markdown=summary_text,
+                )
         except Exception as exc:  # noqa: BLE001
             yield _sse("error", {"detail": f"Failed to re-summarize note: {exc}"})
 
     return Response(event_stream(), mimetype="text/event-stream")
+
+
+@app.patch("/api/study-notes/<note_id>")
+def rename_study_note(note_id: str):
+    payload = request.get_json(silent=True) or {}
+    new_filename = str(payload.get("filename", "")).strip()
+    if not new_filename:
+        return _json_error("filename is required.", 400)
+    if len(new_filename) > 200:
+        return _json_error("filename is too long (max 200 chars).", 400)
+
+    try:
+        store = PineconeStore()
+        updated = store.rename_note(note_id=note_id, filename=new_filename)
+        if updated == 0:
+            return _json_error(f"note_id '{note_id}' not found.", 404)
+        return jsonify({"note_id": note_id, "filename": new_filename, "updated_records": updated})
+    except Exception as exc:  # noqa: BLE001
+        return _json_error(f"Failed to rename note: {exc}", 500)
 
 
 @app.delete("/api/study-notes/<note_id>")

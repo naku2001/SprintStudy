@@ -1,9 +1,10 @@
-import { FileText } from 'lucide-react';
+﻿import { FileText } from 'lucide-react';
 
 function ActionBtn({ children, variant = 'default', onClick }) {
   const styles = {
     default: { color: '#9587c8', background: '#f5f2fc', border: '1px solid #e2daf5' },
-    red:     { color: '#c0392b', background: 'rgba(192,57,43,0.06)', border: '1px solid rgba(192,57,43,0.2)' },
+    red: { color: '#c0392b', background: 'rgba(192,57,43,0.06)', border: '1px solid rgba(192,57,43,0.2)' },
+    danger: { color: '#9587c8', background: '#f5f2fc', border: '1px solid #e2daf5' },
   };
   return (
     <button
@@ -17,10 +18,21 @@ function ActionBtn({ children, variant = 'default', onClick }) {
   );
 }
 
-export default function NoteCard({ note, index, isCached, onViewSummary, onDelete }) {
+export default function NoteCard({
+  note,
+  index,
+  isCached,
+  onView,
+  onResumarize,
+  onOpenSummary,
+  onRename,
+  onDelete,
+}) {
   const date = note.created_at
     ? new Date(note.created_at).toLocaleDateString(undefined, {
-        month: 'short', day: 'numeric', year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
       })
     : null;
 
@@ -29,7 +41,6 @@ export default function NoteCard({ note, index, isCached, onViewSummary, onDelet
       className="rounded-xl border bg-surface p-3.5 transition-all duration-200 hover:shadow-card-hover hover:-translate-x-px animate-card-in"
       style={{ borderColor: 'var(--border)', animationDelay: `${index * 35}ms` }}
     >
-      {/* Filename */}
       <div className="flex items-start gap-2 mb-2.5">
         <FileText size={12} className="flex-shrink-0 mt-0.5" style={{ color: '#c0392b' }} />
         <span className="text-[13px] font-semibold text-ink truncate leading-tight">
@@ -37,18 +48,19 @@ export default function NoteCard({ note, index, isCached, onViewSummary, onDelet
         </span>
       </div>
 
-      {/* Meta */}
-      {(date || isCached) && (
-        <div className="flex flex-wrap gap-1.5 mb-3">
-          {date && <Chip>{date}</Chip>}
-          {isCached && <Chip hi>summary saved</Chip>}
-        </div>
-      )}
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        <Chip>{note.chunk_count} chunk{note.chunk_count !== 1 ? 's' : ''}</Chip>
+        {date && <Chip>{date}</Chip>}
+        {note.local_file_exists && <Chip hi>local</Chip>}
+        {isCached && <Chip hi>summary saved</Chip>}
+      </div>
 
-      {/* Actions */}
-      <div className="flex gap-1.5">
-        <ActionBtn variant="red"     onClick={onViewSummary}>View Summary</ActionBtn>
-        <ActionBtn variant="default" onClick={onDelete}>Delete</ActionBtn>
+      <div className="grid grid-cols-2 gap-1.5">
+        <ActionBtn variant="red" onClick={onResumarize}>Re-summarize</ActionBtn>
+        <ActionBtn variant="default" onClick={onOpenSummary}>Open Summary</ActionBtn>
+        <ActionBtn variant="default" onClick={onRename}>Rename</ActionBtn>
+        <ActionBtn variant="default" onClick={onView}>View Chunks</ActionBtn>
+        <ActionBtn variant="danger" onClick={onDelete}>Delete</ActionBtn>
       </div>
     </div>
   );

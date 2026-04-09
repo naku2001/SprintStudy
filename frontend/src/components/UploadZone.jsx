@@ -7,6 +7,36 @@ export default function UploadZone({ onStreaming, onStatus, onError, onMeta, onT
   const inputRef                = useRef(null);
   const [file, setFile]         = useState(null);
   const [dragOver, setDragOver] = useState(false);
+  const [embeddingChoice, setEmbeddingChoice] = useState('gemini');
+  const [summaryModelChoice, setSummaryModelChoice] = useState('gemini');
+
+  const embeddingOptions = {
+    gemini: {
+      label: 'Gemini embedding (default)',
+      provider: 'gemini',
+      model: 'models/gemini-embedding-001',
+      hint: '',
+    },
+    bgeSmallZh: {
+      label: 'BAAI/bge-small-zh (very slow for test)',
+      provider: 'huggingface',
+      model: 'BAAI/bge-small-zh',
+      hint: 'very slow for test',
+    },
+  };
+
+  const summaryModelOptions = {
+    gemini: {
+      label: 'Gemini 2.5 Flash (default)',
+      provider: 'gemini',
+      model: 'gemini-2.5-flash',
+    },
+    oss120b: {
+      label: 'openai/gpt-oss-120b',
+      provider: 'together',
+      model: 'openai/gpt-oss-120b',
+    },
+  };
 
   function pickFile(f) {
     if (!f) return;
@@ -19,10 +49,18 @@ export default function UploadZone({ onStreaming, onStatus, onError, onMeta, onT
 
     onError('');
     onStreaming(true);
-    onStatus('Uploading…');
+    onStatus('Uploading...');
 
     try {
-      const res = await summarizeStream(file);
+      const selected = embeddingOptions[embeddingChoice] || embeddingOptions.gemini;
+      const summarySelected =
+        summaryModelOptions[summaryModelChoice] || summaryModelOptions.gemini;
+      const res = await summarizeStream(file, {
+        embeddingProvider: selected.provider,
+        embeddingModel: selected.model,
+        generationProvider: summarySelected.provider,
+        generationModel: summarySelected.model,
+      });
       await consumeSse(res, (evt, payload) => {
         if (evt === 'status') onStatus(payload.message || '');
         if (evt === 'meta')   onMeta(payload);
@@ -97,6 +135,41 @@ export default function UploadZone({ onStreaming, onStatus, onError, onMeta, onT
         )}
 
         {/* Actions */}
+        <div className="max-w-[560px] mx-auto mb-5 text-left">
+          <label className="block text-[12px] font-semibold uppercase tracking-wider text-muted mb-2">
+            Embedding model
+          </label>
+          <select
+            value={embeddingChoice}
+            onChange={(e) => setEmbeddingChoice(e.target.value)}
+            className="w-full rounded-xl border px-3 py-2.5 text-[13.5px] text-ink bg-white"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            <option value="gemini">{embeddingOptions.gemini.label}</option>
+            <option value="bgeSmallZh">{embeddingOptions.bgeSmallZh.label}</option>
+          </select>
+          {!!(embeddingOptions[embeddingChoice] || embeddingOptions.gemini).hint && (
+            <p className="mt-2 text-[12px] text-muted">
+              {(embeddingOptions[embeddingChoice] || embeddingOptions.gemini).hint}
+            </p>
+          )}
+        </div>
+
+        <div className="max-w-[560px] mx-auto mb-5 text-left">
+          <label className="block text-[12px] font-semibold uppercase tracking-wider text-muted mb-2">
+            Summary model
+          </label>
+          <select
+            value={summaryModelChoice}
+            onChange={(e) => setSummaryModelChoice(e.target.value)}
+            className="w-full rounded-xl border px-3 py-2.5 text-[13.5px] text-ink bg-white"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            <option value="gemini">{summaryModelOptions.gemini.label}</option>
+            <option value="oss120b">{summaryModelOptions.oss120b.label}</option>
+          </select>
+        </div>
+
         <div className="flex items-center justify-center gap-3">
           <button
             type="button"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -65,7 +67,39 @@ class PineconeStore:
             }
             for record in records
         ]
-        self.index.upsert(vectors=vectors, namespace=self.namespace)
+        if not vectors:
+            return
+
+        max_records = max(1, int(settings.PINECONE_UPSERT_MAX_RECORDS))
+        max_bytes = max(200_000, int(settings.PINECONE_UPSERT_MAX_BYTES))
+
+        batch: list[dict[str, Any]] = []
+        batch_bytes = 0
+
+        for vec in vectors:
+            payload_size = len(json.dumps(vec, ensure_ascii=False))
+
+            # If one record is extremely large, send it alone and let server decide.
+            if payload_size >= max_bytes:
+                if batch:
+                    self.index.upsert(vectors=batch, namespace=self.namespace)
+                    batch = []
+                    batch_bytes = 0
+                self.index.upsert(vectors=[vec], namespace=self.namespace)
+                continue
+
+            exceed_records = len(batch) >= max_records
+            exceed_bytes = batch and (batch_bytes + payload_size > max_bytes)
+            if exceed_records or exceed_bytes:
+                self.index.upsert(vectors=batch, namespace=self.namespace)
+                batch = []
+                batch_bytes = 0
+
+            batch.append(vec)
+            batch_bytes += payload_size
+
+        if batch:
+            self.index.upsert(vectors=batch, namespace=self.namespace)
 
     def query(
         self, vector: list[float], top_k: int = 5, filter_dict: Optional[dict[str, Any]] = None
@@ -95,16 +129,72 @@ class PineconeStore:
             record_ids.extend(page_ids)
         return record_ids
 
-    def fetch_records(self, record_ids: list[str]) -> dict[str, Any]:
+    def fetch_records(self, record_ids: list[str], batch_size: int = 100) -> dict[str, Any]:
         if not record_ids:
             return {}
 
-        response = self.index.fetch(ids=record_ids, namespace=self.namespace)
+        merged: dict[str, Any] = {}
+        size = max(1, min(batch_size, 200))
+        for i in range(0, len(record_ids), size):
+            chunk_ids = record_ids[i : i + size]
+            response = self.index.fetch(ids=chunk_ids, namespace=self.namespace)
+            if hasattr(response, "vectors"):
+                merged.update(dict(response.vectors))
+            elif isinstance(response, dict):
+                merged.update(dict(response.get("vectors", {})))
+        return merged
+
+    def rename_note(self, note_id: str, filename: str) -> int:
+        record_ids = self.list_record_ids(prefix=f"{note_id}:")
+        if not record_ids:
+            return 0
+
+        updated = 0
+        for record_id in record_ids:
+            self.index.update(
+                id=record_id,
+                set_metadata={"filename": filename},
+                namespace=self.namespace,
+            )
+            updated += 1
+        return updated
+
+    def upsert_note_summary(self, note_id: str, filename: str, summary_markdown: str) -> None:
+        dim = int(settings.EMBEDDING_DIMENSION)
+        # Pinecone dense vectors cannot be all-zero.
+        values = [0.0] * dim
+        if dim > 0:
+            values[0] = 1e-6
+        record = {
+            "id": f"{note_id}:summary",
+            "values": values,
+            "metadata": {
+                "note_id": note_id,
+                "filename": filename,
+                "source_type": "note_summary",
+                "summary_markdown": summary_markdown,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+        self.index.upsert(vectors=[record], namespace=self.namespace)
+
+    def fetch_note_summary(self, note_id: str) -> Optional[str]:
+        response = self.index.fetch(ids=[f"{note_id}:summary"], namespace=self.namespace)
+        vectors: dict[str, Any] = {}
         if hasattr(response, "vectors"):
-            return dict(response.vectors)
-        if isinstance(response, dict):
-            return dict(response.get("vectors", {}))
-        return {}
+            vectors = dict(response.vectors)
+        elif isinstance(response, dict):
+            vectors = dict(response.get("vectors", {}))
+        raw = vectors.get(f"{note_id}:summary")
+        if raw is None:
+            return None
+        metadata = getattr(raw, "metadata", None)
+        if isinstance(raw, dict):
+            metadata = raw.get("metadata", metadata)
+        if not isinstance(metadata, dict):
+            return None
+        text = metadata.get("summary_markdown")
+        return str(text) if text else None
 
     def delete_by_note_id(self, note_id: str) -> None:
         self.index.delete(filter={"note_id": {"$eq": note_id}}, namespace=self.namespace)

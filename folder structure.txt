@@ -1,34 +1,90 @@
-﻿# Smart Study App
+﻿# SprintStudy Project Structure
 
-## Project Structure
+## Current Layout
 
-smart-study-app/
-|-- .env.example                  # Env template (Gemini + Pinecone)
-|-- .env                          # Local secrets (ignored by git)
+```
+SprintStudy/
+|-- .env
+|-- .env.example
+|-- README.md
+|-- folder structure.txt
 |-- backend/
 |   |-- __init__.py
-|   |-- main.py                   # Flask app + /api/study-notes/summarize
+|   |-- main.py
+|   |-- requirements.txt
 |   |-- config/
-|   |   |-- __init__.py
-|   |   `-- settings.py           # GEMINI_* + PINECONE_* + STUDY_NOTES_DIR
-|   |-- models/
-|   |   |-- __init__.py
-|   |   `-- study_note.py         # Response schema for summary endpoint
-|   |-- templates/
-|   |   `-- index.html            # Minimal upload UI for study note summary
-|   |-- services/
-|   |   |-- __init__.py
-|   |   |-- pinecone_store.py     # Unified Pinecone data manager
-|   |   `-- study_note_service.py # Chunking + Gemini summary + Pinecone upsert
+|   |   `-- settings.py
 |   |-- data/
-|   |   `-- uploads_tmp/          # Temporary uploaded files (.pdf/.txt)
-|   |       `-- .gitkeep
-|   `-- requirements.txt
-|
-|-- frontend/                     # React Application (planned)
-|   |-- src/
-|   |   |-- components/
-|   |   `-- api/
-|   `-- package.json
-|
-`-- docker-compose.yml            # Orchestrates services (planned)
+|   |   `-- uploads_tmp/
+|   |-- models/
+|   |   `-- study_note.py
+|   |-- services/
+|   |   |-- pinecone_store.py
+|   |   `-- study_note_service.py
+|   `-- templates/
+|       `-- index.html
+`-- frontend/
+    |-- package.json
+    |-- package-lock.json
+    |-- vite.config.js
+    |-- index.html
+    `-- src/
+        |-- App.jsx
+        |-- main.jsx
+        |-- index.css
+        |-- api/
+        |   `-- studyNotes.js
+        |-- components/
+        |   |-- Nav.jsx
+        |   |-- UploadZone.jsx
+        |   |-- StatusBar.jsx
+        |   |-- SummaryPanel.jsx
+        |   |-- Library.jsx
+        |   |-- NoteCard.jsx
+        |   |-- NoteDetailModal.jsx
+        |   `-- FlashcardsWIP.jsx
+        `-- utils/
+            |-- sse.js
+            `-- markdown.js
+```
+
+## Startup Quick Path
+
+1. Copy env template
+
+```powershell
+Copy-Item .env.example .env
+```
+
+2. Fill required keys in `.env`
+
+- `GEMINI_API_KEY`
+- `PINECONE_API_KEY`
+- Optional: `TOGETHER_API_KEY` (only needed if you choose `openai/gpt-oss-120b` in UI)
+- Optional: `HUGGINGFACE_API_KEY` (only needed if you choose `BAAI/bge-small-zh` embedding)
+
+3. Start backend
+
+```powershell
+pip install -r backend\requirements.txt
+python backend\main.py
+```
+
+4. Start frontend in a new terminal
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+5. Open browser
+
+- Frontend: `http://localhost:3000`
+- Backend health: `http://localhost:8000/health`
+
+## Notes
+
+- Library supports: `Re-summarize`, `Open Summary`, `Rename`, `View Chunks`, `Delete`.
+- Saved summary is persisted per note and overwritten on re-summarize.
+- Vite dev server proxies `/api/*` to Flask (`localhost:8000`).

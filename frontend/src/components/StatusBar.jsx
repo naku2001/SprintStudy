@@ -1,6 +1,6 @@
 import { AlertCircle } from 'lucide-react';
 
-export function ProcessBar({ visible }) {
+export function ProcessBar({ visible, status }) {
   if (!visible) return null;
   return (
     <div
@@ -8,11 +8,12 @@ export function ProcessBar({ visible }) {
       style={{ borderColor: 'var(--border)', boxShadow: 'var(--shadow-sm)' }}
     >
       <div className="flex items-center justify-between">
-        <span className="text-[13.5px] font-semibold text-ink">Summarizing your document…</span>
+        <span className="text-[13.5px] font-semibold text-ink">
+          {status || 'Summarizing your document...'}
+        </span>
         <span className="text-[11px] font-mono text-muted">AI at work</span>
       </div>
 
-      {/* Indeterminate shimmer bar */}
       <div
         className="relative h-1.5 rounded-full overflow-hidden"
         style={{ background: '#ede8f8' }}
@@ -20,7 +21,8 @@ export function ProcessBar({ visible }) {
         <div
           style={{
             position: 'absolute',
-            top: 0, bottom: 0,
+            top: 0,
+            bottom: 0,
             width: '40%',
             background: 'linear-gradient(90deg, transparent, #c0392b, transparent)',
             animation: 'shimmer 1.6s ease-in-out infinite',
@@ -52,7 +54,7 @@ export function ErrorBox({ message, onDismiss }) {
           onClick={onDismiss}
           className="text-muted text-xs flex-shrink-0 hover:opacity-70 transition-opacity"
         >
-          ✕
+          x
         </button>
       )}
     </div>

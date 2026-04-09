@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useRef, useState } from 'react';
 import Nav from './components/Nav';
 import UploadZone from './components/UploadZone';
 import { ProcessBar, ErrorBox } from './components/StatusBar';
@@ -10,20 +10,23 @@ import { normalizeMarkdown } from './utils/markdown';
 import { saveToCache } from './utils/summaryCache';
 
 export default function App() {
-  const [page, setPage]           = useState('home');
-  const [summary, setSummary]     = useState('');
+  const [page, setPage] = useState('home');
+  const [summary, setSummary] = useState('');
   const [streaming, setStreaming] = useState(false);
-  const [error, setError]         = useState('');
-  const [meta, setMeta]           = useState(null);
+  const [error, setError] = useState('');
+  const [meta, setMeta] = useState(null);
+  const [status, setStatus] = useState('');
   const [viewNoteId, setViewNoteId] = useState(null);
 
-  const libraryRef    = useRef(null);
-  const summaryBuf    = useRef('');
-  const activeNoteId  = useRef(null); // tracks note_id of the in-progress stream
+  const libraryRef = useRef(null);
+  const summaryBuf = useRef('');
+  const activeNoteId = useRef(null);
 
   useEffect(() => {
     window.__viewNote = (noteId) => setViewNoteId(noteId);
-    return () => { delete window.__viewNote; };
+    return () => {
+      delete window.__viewNote;
+    };
   }, []);
 
   const handleStreaming = useCallback((on) => {
@@ -33,12 +36,14 @@ export default function App() {
       activeNoteId.current = null;
       setSummary('');
       setMeta(null);
+      setStatus('Preparing...');
+    } else {
+      setStatus('');
     }
   }, []);
 
   const handleMeta = useCallback((metaData) => {
     setMeta(metaData);
-    // Capture note_id so we can cache the summary when done
     if (metaData?.note_id) {
       activeNoteId.current = metaData.note_id;
     }
@@ -50,19 +55,20 @@ export default function App() {
   }, []);
 
   const handleDone = useCallback(() => {
-    // Persist the finished summary to localStorage
     if (activeNoteId.current && summaryBuf.current) {
       saveToCache(activeNoteId.current, summaryBuf.current);
     }
     libraryRef.current?.refresh();
   }, []);
 
-  // Called by Library when a cached summary should be displayed directly
   const handleShowCachedSummary = useCallback((noteId, cachedSummary, noteMeta) => {
-    summaryBuf.current = cachedSummary;
-    setSummary(cachedSummary);
-    setMeta(noteMeta);
+    activeNoteId.current = noteId;
+    summaryBuf.current = normalizeMarkdown(cachedSummary || '');
+    setSummary(summaryBuf.current);
+    setMeta(noteMeta || null);
     setError('');
+    setStreaming(false);
+    setStatus('Loaded saved summary');
   }, []);
 
   const isHome = page === 'home';
@@ -88,14 +94,14 @@ export default function App() {
           <>
             <UploadZone
               onStreaming={handleStreaming}
-              onStatus={() => {}}
+              onStatus={setStatus}
               onError={setError}
               onMeta={handleMeta}
               onToken={handleToken}
               onDone={handleDone}
             />
 
-            <ProcessBar visible={streaming} />
+            <ProcessBar visible={streaming} status={status} />
             <ErrorBox message={error} onDismiss={() => setError('')} />
             <SummaryPanel summary={summary} streaming={streaming} meta={meta} />
           </>
@@ -109,7 +115,7 @@ export default function App() {
           <Library
             ref={libraryRef}
             onStreaming={handleStreaming}
-            onStatus={() => {}}
+            onStatus={setStatus}
             onError={setError}
             onMeta={handleMeta}
             onToken={handleToken}
@@ -119,10 +125,7 @@ export default function App() {
         </div>
       )}
 
-      <NoteDetailModal
-        noteId={viewNoteId}
-        onClose={() => setViewNoteId(null)}
-      />
+      <NoteDetailModal noteId={viewNoteId} onClose={() => setViewNoteId(null)} />
     </div>
   );
 }

@@ -38,6 +38,7 @@ export default function SummaryPanel({ summary, streaming, meta }) {
           {meta?.filename && <Chip>{meta.filename}</Chip>}
           {meta?.chunks   && <Chip hi>{meta.chunks} chunks</Chip>}
           {meta?.source === 'pinecone_stored_chunks' && <Chip hi>re-summarized</Chip>}
+          {meta?.source === 'stored_summary' && <Chip hi>saved</Chip>}
         </div>
       </div>
 

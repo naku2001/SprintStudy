@@ -34,13 +34,29 @@ export async function deleteNote(noteId) {
   return data;
 }
 
+/** Rename a note display filename stored in Pinecone metadata. */
+export async function renameNote(noteId, filename) {
+  const res = await fetch(`${BASE}/${encodeURIComponent(noteId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename }),
+  });
+  const data = await safeJson(res);
+  if (!res.ok) throw new Error(data.detail || `Server error ${res.status}.`);
+  return data;
+}
+
 /**
  * Upload a file and stream the summarization.
  * Returns a raw Response for SSE consumption.
  */
-export async function summarizeStream(file) {
+export async function summarizeStream(file, options = {}) {
   const fd = new FormData();
   fd.append('file', file);
+  if (options.embeddingProvider) fd.append('embedding_provider', options.embeddingProvider);
+  if (options.embeddingModel) fd.append('embedding_model', options.embeddingModel);
+  if (options.generationProvider) fd.append('generation_provider', options.generationProvider);
+  if (options.generationModel) fd.append('generation_model', options.generationModel);
   const res = await fetch(`${BASE}/summarize-stream`, { method: 'POST', body: fd });
   if (!res.ok) {
     const data = await safeJson(res);

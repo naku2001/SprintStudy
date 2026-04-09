@@ -1,6 +1,6 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
+﻿import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 import { RefreshCw, BookOpen } from 'lucide-react';
-import { listNotes, deleteNote, resummarizeStream } from '../api/studyNotes';
+import { listNotes, deleteNote, getNoteDetail, renameNote, resummarizeStream } from '../api/studyNotes';
 import { consumeSse } from '../utils/sse';
 import { loadFromCache, saveToCache, removeFromCache } from '../utils/summaryCache';
 import NoteCard from './NoteCard';
@@ -9,7 +9,7 @@ const Library = forwardRef(function Library(
   { onStreaming, onStatus, onError, onMeta, onToken, onDone, onShowCachedSummary },
   ref
 ) {
-  const [notes, setNotes]     = useState([]);
+  const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [libError, setLibErr] = useState('');
 
@@ -26,38 +26,28 @@ const Library = forwardRef(function Library(
     }
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
   useImperativeHandle(ref, () => ({ refresh }), [refresh]);
 
-  async function handleViewSummary(note) {
-    // Check localStorage first — show instantly if cached
-    const cached = loadFromCache(note.note_id);
-    if (cached) {
-      onShowCachedSummary(note.note_id, cached, {
-        note_id: note.note_id,
-        filename: note.filename,
-        source: 'cache',
-      });
-      return;
-    }
-
-    // No cache yet — generate it and cache the result
+  async function handleResumarize(noteId) {
     onError('');
     onStreaming(true);
-    onStatus('Generating summary…');
+    onStatus('Loading stored chunks...');
     try {
-      const res = await resummarizeStream(note.note_id);
+      const res = await resummarizeStream(noteId);
       let fullSummary = '';
       await consumeSse(res, (evt, payload) => {
         if (evt === 'status') onStatus(payload.message || '');
-        if (evt === 'meta')   onMeta({ ...payload, filename: note.filename });
+        if (evt === 'meta') onMeta(payload);
         if (evt === 'token') {
-          fullSummary += payload.text || '';
-          onToken(payload.text || '');
+          const part = payload.text || '';
+          fullSummary += part;
+          onToken(part);
         }
         if (evt === 'done') {
-          // Cache the generated summary for next time
-          if (fullSummary) saveToCache(note.note_id, fullSummary);
+          if (fullSummary) saveToCache(noteId, fullSummary);
           onStatus('Done');
           onDone();
         }
@@ -70,14 +60,66 @@ const Library = forwardRef(function Library(
     }
   }
 
+  async function handleOpenSummary(note) {
+    const cached = loadFromCache(note.note_id);
+    if (cached) {
+      onShowCachedSummary?.(note.note_id, cached, {
+        note_id: note.note_id,
+        filename: note.filename,
+        chunks: note.chunk_count,
+        source: 'cache',
+      });
+      return;
+    }
+
+    onError('');
+    onStreaming(true);
+    onStatus('Loading saved summary...');
+    try {
+      const detail = await getNoteDetail(note.note_id);
+      const saved = (detail?.summary_markdown || '').trim();
+      if (!saved) {
+        throw new Error('No saved summary found for this note yet.');
+      }
+      saveToCache(note.note_id, saved);
+      onShowCachedSummary?.(note.note_id, saved, {
+        note_id: note.note_id,
+        filename: detail.filename || note.filename,
+        chunks: detail.chunk_count || note.chunk_count,
+        source: 'stored_summary',
+      });
+    } catch (err) {
+      onError(err.message || String(err));
+    } finally {
+      onStreaming(false);
+    }
+  }
+
   async function handleDelete(note) {
     if (!window.confirm('Delete this note? Pinecone vectors and the local file will be removed.')) return;
     try {
       await deleteNote(note.note_id);
-      removeFromCache(note.note_id); // clean up cached summary too
+      removeFromCache(note.note_id);
       await refresh();
     } catch (err) {
       onError(err.message);
+    }
+  }
+
+  async function handleRename(note) {
+    const current = note?.filename || '';
+    const next = window.prompt('Rename note filename:', current);
+    if (next == null) return;
+    const trimmed = next.trim();
+    if (!trimmed) {
+      onError('Filename cannot be empty.');
+      return;
+    }
+    try {
+      await renameNote(note.note_id, trimmed);
+      await refresh();
+    } catch (err) {
+      onError(err.message || String(err));
     }
   }
 
@@ -86,7 +128,6 @@ const Library = forwardRef(function Library(
       className="flex flex-col h-full border-l bg-surface"
       style={{ borderColor: 'var(--border)' }}
     >
-      {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-3.5 border-b flex-shrink-0"
         style={{ borderColor: 'var(--border)', background: '#f8f5ff' }}
@@ -105,12 +146,11 @@ const Library = forwardRef(function Library(
         </button>
       </div>
 
-      {/* Note list */}
       <div className="flex-1 overflow-y-auto p-2.5 flex flex-col gap-2">
         {loading && (
           <div className="text-center py-10 text-[13px] text-muted">
-            <div className="text-2xl mb-2 opacity-40">⏳</div>
-            Loading…
+            <div className="text-2xl mb-2 opacity-40">...</div>
+            Loading...
           </div>
         )}
 
@@ -122,23 +162,27 @@ const Library = forwardRef(function Library(
 
         {!loading && !libError && notes.length === 0 && (
           <div className="text-center py-10 text-[13px] text-muted leading-relaxed px-4">
-            <div className="text-3xl mb-3 opacity-30">📚</div>
+            <div className="text-3xl mb-3 opacity-30">[]</div>
             No notes yet.
             <br />
             Upload a document to begin.
           </div>
         )}
 
-        {!loading && notes.map((note, i) => (
-          <NoteCard
-            key={note.note_id}
-            note={note}
-            index={i}
-            isCached={!!loadFromCache(note.note_id)}
-            onViewSummary={() => handleViewSummary(note)}
-            onDelete={() => handleDelete(note)}
-          />
-        ))}
+        {!loading &&
+          notes.map((note, i) => (
+            <NoteCard
+              key={note.note_id}
+              note={note}
+              index={i}
+              isCached={!!loadFromCache(note.note_id)}
+              onResumarize={() => handleResumarize(note.note_id)}
+              onOpenSummary={() => handleOpenSummary(note)}
+              onRename={() => handleRename(note)}
+              onView={() => window.__viewNote?.(note.note_id)}
+              onDelete={() => handleDelete(note)}
+            />
+          ))}
       </div>
     </aside>
   );

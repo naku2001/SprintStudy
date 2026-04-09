@@ -1,7 +1,20 @@
+# Runtime dependencies for backend (fresh environment compatible)
+
+# Web API
 flask>=3.0.0
 flask-cors>=4.0.0
-google-genai>=0.7.0
-numpy>=1.26.0
-pymupdf>=1.24.0
-pinecone>=7.0.0
+
+# Env/config + data models
 python-dotenv>=1.0.0
+pydantic>=2.7.0
+
+# AI providers (Gemini + Together via HTTP)
+google-genai>=0.7.0
+requests>=2.31.0
+
+# Vector DB
+pinecone>=7.0.0
+
+# Document parsing + numeric ops
+pymupdf>=1.24.0
+numpy>=1.26.0
