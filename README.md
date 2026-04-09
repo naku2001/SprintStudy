@@ -44,7 +44,28 @@ npm --version
 ```
 
 If `npm`/`node` is missing, install Node.js from https://nodejs.org/  
-If you use conda, you can also install it in conda (optional):
+or install with command line:
+
+macOS (Homebrew):
+
+```bash
+brew install node@20
+```
+
+Ubuntu/Debian:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y nodejs npm
+```
+
+Windows (winget):
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+```
+
+If you use conda, this is an optional alternative:
 
 ```bash
 conda install -c conda-forge nodejs=20 -y
@@ -128,7 +149,7 @@ npm run dev
 
 ### `npm` not recognized
 
-Install Node.js (any normal installer works), then reopen terminal and verify:
+Follow **Quick Start -> Step 0** to install Node.js, then reopen terminal and verify:
 
 ```bash
 node --version
