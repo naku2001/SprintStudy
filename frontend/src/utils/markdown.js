@@ -5,9 +5,13 @@ function esc(t) {
     .replace(/>/g, '&gt;');
 }
 
+function escRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /** Normalize raw markdown from backend into canonical section headings. */
 export function normalizeMarkdown(text) {
-  const raw = String(text || '').replace(/\r\n/g, '\n').replace(/\*\*/g, '');
+  let raw = String(text || '').replace(/\r\n/g, '\n').replace(/\*\*/g, '');
   const map = {
     'one-sentence overview':    '# One-Sentence Overview',
     'key takeaways':            '## Key Takeaways',
@@ -17,8 +21,20 @@ export function normalizeMarkdown(text) {
     '3 quick review questions': '## Quick Review Questions',
     'quick review questions':   '## Quick Review Questions',
   };
+  const headingKeys = Object.keys(map).sort((a, b) => b.length - a.length);
 
-  const lines = raw.split('\n').map((l) => {
+  // Handle compact model outputs where heading and body are glued together.
+  for (const key of headingKeys) {
+    const k = escRe(key);
+    raw = raw.replace(new RegExp(`(${k})(?=[A-Za-z0-9])`, 'gi'), '$1\n');
+    raw = raw.replace(
+      new RegExp(`(#{1,6}\\s*${k})\\s*[-_]+\\s*`, 'gi'),
+      '$1\n- '
+    );
+  }
+
+  const lines = [];
+  for (const l of raw.split('\n')) {
     const trimmed = l.trim();
     const k = trimmed.replace(/:$/, '').toLowerCase();
     const normalizedKey = k
@@ -26,13 +42,32 @@ export function normalizeMarkdown(text) {
       .replace(/^\d+\s+/, '')
       .trim();
     const mapped = map[k] || map[normalizedKey];
-    if (mapped) return mapped;
+    if (mapped) {
+      lines.push(mapped);
+      continue;
+    }
+
+    // Split lines like "One-Sentence OverviewSome text..."
+    let splitDone = false;
+    for (const key of headingKeys) {
+      if (!normalizedKey.startsWith(key)) continue;
+      const heading = map[key];
+      const lineNoHashes = trimmed.replace(/^#{1,6}\s*/, '').replace(/^\d+\s+/, '').trim();
+      const rest = lineNoHashes.replace(new RegExp(`^${escRe(key)}\\s*[:：-]?\\s*`, 'i'), '').trim();
+      lines.push(heading);
+      if (rest) lines.push(rest);
+      splitDone = true;
+      break;
+    }
+    if (splitDone) continue;
+
     // Normalize heading forms like "## 3 Quick Review Questions"
     if (/^#{1,6}\s*3 quick review questions:?$/i.test(trimmed)) {
-      return '## Quick Review Questions';
+      lines.push('## Quick Review Questions');
+      continue;
     }
-    return l;
-  });
+    lines.push(l);
+  }
 
   // Drop dangling heading markers produced by streamed partial tokens.
   const cleanedLines = lines.filter((l) => !/^#{1,6}\s*$/.test(l.trim()));

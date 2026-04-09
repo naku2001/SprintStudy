@@ -154,6 +154,15 @@ def _sse(event: str, data: dict[str, Any]) -> str:
 class _StreamMarkdownCleaner:
     def __init__(self) -> None:
         self._carry = ""
+        self._heading_terms = [
+            "One-Sentence Overview",
+            "Key Takeaways",
+            "Topic Flow",
+            "Important Details",
+            "Risks or Limitations",
+            "Quick Review Questions",
+            "3 Quick Review Questions",
+        ]
 
     def clean(self, text: str) -> str:
         if not text:
@@ -168,6 +177,19 @@ class _StreamMarkdownCleaner:
         cleaned = re.sub(r"(?<!\n)(##\s)", r"\n## ", cleaned)
         cleaned = re.sub(r"(?<!\n)(#\s)", r"\n# ", cleaned)
         cleaned = re.sub(r"(## [^\n]+?)\s*-\s", r"\1\n- ", cleaned)
+        for term in self._heading_terms:
+            cleaned = re.sub(
+                rf"({re.escape(term)})(?=[A-Za-z0-9])",
+                r"\1\n",
+                cleaned,
+                flags=re.IGNORECASE,
+            )
+            cleaned = re.sub(
+                rf"(#{{1,6}}\s*{re.escape(term)})\s*[-_]+\s*",
+                r"\1\n- ",
+                cleaned,
+                flags=re.IGNORECASE,
+            )
         return cleaned
 
     def flush(self) -> str:
